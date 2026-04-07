@@ -431,18 +431,46 @@
     }
 
     /* ── Responsive ───────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .feature-grid { grid-template-columns: repeat(2, 1fr); }
+      .usage-grid { grid-template-columns: 1fr; }
+    }
     @media (max-width: 768px) {
       .hero { padding: 60px 0 40px; }
       .hero h1 { font-size: 2.5em; }
-      .hero .subtitle { font-size: 1.05em; }
+      .hero .subtitle { font-size: 1.05em; padding: 0 8px; }
+      .hero::before { width: 300px; height: 300px; }
       .feature-grid { grid-template-columns: 1fr; }
       .platform-grid { grid-template-columns: 1fr; }
-      .usage-grid { grid-template-columns: 1fr; }
       .flow { flex-direction: column; gap: 8px; }
       .flow-arrow { transform: rotate(90deg); padding: 4px 0; }
-      .install-box { border-radius: 12px; }
-      .os-tabs { flex-wrap: wrap; }
-      .os-tab { flex: 1; text-align: center; min-width: 80px; }
+      .flow-node { min-width: auto; width: 100%; }
+      .install-hero { margin: 0 auto 36px; }
+      .install-box { border-radius: 12px; padding: 18px 16px; }
+      .install-cmd { font-size: 0.82em; word-break: break-all; }
+      .os-tabs { flex-wrap: wrap; gap: 0; }
+      .os-tab { flex: 1; text-align: center; min-width: 80px; padding: 8px 12px; font-size: 0.85em; }
+      .copy-btn { top: 10px; right: 10px; padding: 4px 10px; font-size: 0.75em; }
+      .usage-card pre { padding: 12px; font-size: 0.82em; }
+      .usage-card pre code { word-break: break-all; white-space: pre-wrap; }
+      .dl-table { font-size: 0.8em; }
+      .dl-table th, .dl-table td { padding: 8px 10px; }
+      .dl-table a { font-size: 0.85em; word-break: break-all; }
+      .buttons { flex-direction: column; align-items: center; }
+      .btn { width: 100%; max-width: 280px; justify-content: center; }
+      .how-it-works h2, .features h2, .install-section h2, .usage h2 { font-size: 1.6em; }
+      .container { padding: 0 16px; }
+      .nav { gap: 4px; }
+      .nav a { padding: 6px 10px; font-size: 0.82em; }
+      .header { padding: 10px 0; }
+      .footer-links { gap: 16px; flex-wrap: wrap; }
+    }
+    @media (max-width: 420px) {
+      .hero h1 { font-size: 2em; }
+      .hero .subtitle { font-size: 0.95em; }
+      .badge { font-size: 0.78em; padding: 4px 12px; }
+      .install-cmd { font-size: 0.75em; }
+      .os-tab { font-size: 0.8em; padding: 6px 8px; }
     }
   </style>
 </head>
