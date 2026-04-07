@@ -7,41 +7,53 @@
   <meta name="description" content="Single-binary Go proxy that lets Anthropic-format clients use OpenAI-compatible backends. Use Claude Code with ChatGPT, OpenAI API, Azure, vLLM, and more.">
   <style>
     :root {
-      --bg: #0d1117;
-      --surface: #161b22;
-      --border: #30363d;
-      --text: #e6edf3;
-      --text-muted: #8b949e;
-      --accent: #58a6ff;
-      --accent-hover: #79c0ff;
-      --green: #3fb950;
-      --orange: #d29922;
-      --code-bg: #0d1117;
-      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-      --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-hover: #1a1a1a;
+      --border: #262626;
+      --border-hover: #404040;
+      --text: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #3b82f6;
+      --accent-hover: #60a5fa;
+      --accent-glow: rgba(59, 130, 246, 0.15);
+      --green: #22c55e;
+      --green-dim: #166534;
+      --purple: #a78bfa;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Helvetica, Arial, sans-serif;
+      --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, 'Liberation Mono', Menlo, monospace;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       font-family: var(--font);
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
       min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
     }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { color: var(--accent-hover); text-decoration: underline; }
+    a { color: var(--accent); text-decoration: none; transition: color 0.15s; }
+    a:hover { color: var(--accent-hover); }
     code {
       font-family: var(--mono);
       background: var(--surface);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 0.9em;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 0.88em;
+      border: 1px solid var(--border);
     }
+    ::selection { background: var(--accent); color: white; }
 
-    /* Header */
+    /* ── Header ──────────────────────────────────────────── */
     .header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(10,10,10,0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       border-bottom: 1px solid var(--border);
-      padding: 16px 0;
+      padding: 14px 0;
     }
     .header .container {
       display: flex;
@@ -49,243 +61,388 @@
       justify-content: space-between;
     }
     .logo {
-      font-size: 1.4em;
+      font-size: 1.3em;
       font-weight: 700;
       color: var(--text);
-    }
-    .logo:hover { text-decoration: none; }
-    .nav a {
-      color: var(--text-muted);
-      margin-left: 24px;
-      font-size: 0.95em;
-    }
-    .nav a:hover { color: var(--text); }
-
-    /* Container */
-    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
-
-    /* Hero */
-    .hero {
-      text-align: center;
-      padding: 80px 0 60px;
-    }
-    .hero h1 {
-      font-size: 3em;
-      font-weight: 800;
-      margin-bottom: 16px;
       letter-spacing: -0.02em;
     }
-    .hero .subtitle {
-      font-size: 1.25em;
-      color: var(--text-muted);
-      max-width: 600px;
-      margin: 0 auto 40px;
+    .logo:hover { text-decoration: none; color: var(--text); }
+    .logo-dot { color: var(--accent); }
+    .nav { display: flex; gap: 8px; }
+    .nav a {
+      color: var(--text-secondary);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.9em;
+      font-weight: 500;
+      transition: all 0.15s;
     }
-    .hero-code {
+    .nav a:hover {
+      color: var(--text);
+      background: var(--surface);
+      text-decoration: none;
+    }
+
+    /* ── Container ───────────────────────────────────────── */
+    .container { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Hero ────────────────────────────────────────────── */
+    .hero {
+      text-align: center;
+      padding: 100px 0 80px;
+      position: relative;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 16px;
+      border-radius: 99px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px 28px;
+      color: var(--text-secondary);
+      font-size: 0.85em;
+      font-weight: 500;
+      margin-bottom: 24px;
+    }
+    .badge-dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
       display: inline-block;
+    }
+    .hero h1 {
+      font-size: 4em;
+      font-weight: 800;
+      margin-bottom: 20px;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      position: relative;
+    }
+    .hero .subtitle {
+      font-size: 1.3em;
+      color: var(--text-secondary);
+      max-width: 580px;
+      margin: 0 auto 48px;
+      line-height: 1.5;
+    }
+
+    /* ── OS-aware install box ────────────────────────────── */
+    .install-hero {
+      max-width: 620px;
+      margin: 0 auto 48px;
+    }
+    .os-tabs {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+      margin-bottom: 0;
+    }
+    .os-tab {
+      padding: 10px 20px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      color: var(--text-muted);
+      font-family: var(--font);
+      font-size: 0.9em;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .os-tab:hover { color: var(--text-secondary); }
+    .os-tab.active {
+      background: var(--surface);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .install-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0 12px 12px 12px;
+      padding: 24px 28px;
       text-align: left;
+      position: relative;
+      transition: border-color 0.2s;
+    }
+    .install-box:hover { border-color: var(--border-hover); }
+    .install-cmd {
       font-family: var(--mono);
       font-size: 0.95em;
       line-height: 1.8;
-      margin-bottom: 40px;
+      color: var(--green);
+      word-break: break-all;
     }
-    .hero-code .comment { color: var(--text-muted); }
-    .hero-code .cmd { color: var(--green); }
+    .install-cmd .prompt { color: var(--text-muted); user-select: none; }
+    .install-cmd .comment { color: var(--text-muted); }
+    .install-pane { display: none; }
+    .install-pane.active { display: block; }
+    .copy-btn {
+      position: absolute;
+      top: 16px; right: 16px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      padding: 6px 12px;
+      font-size: 0.8em;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--border-hover); }
 
-    /* Buttons */
+    /* ── Hero buttons ────────────────────────────────────── */
     .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
     .btn {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-size: 1em;
+      padding: 12px 28px;
+      border-radius: 10px;
+      font-size: 0.95em;
       font-weight: 600;
       text-decoration: none !important;
-      transition: all 0.15s;
+      transition: all 0.2s;
     }
     .btn-primary {
       background: var(--accent);
-      color: var(--bg) !important;
+      color: white !important;
+      box-shadow: 0 0 20px var(--accent-glow);
     }
-    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
     .btn-secondary {
       background: var(--surface);
       color: var(--text) !important;
       border: 1px solid var(--border);
     }
-    .btn-secondary:hover { border-color: var(--text-muted); }
+    .btn-secondary:hover { border-color: var(--border-hover); background: var(--surface-hover); }
 
-    /* Features */
+    /* ── How it works ────────────────────────────────────── */
+    .how-it-works {
+      padding: 80px 0;
+      border-top: 1px solid var(--border);
+    }
+    .how-it-works h2 {
+      text-align: center;
+      font-size: 2em;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .how-it-works .subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      margin-bottom: 48px;
+      font-size: 1.1em;
+    }
+    .flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin-bottom: 48px;
+      flex-wrap: wrap;
+    }
+    .flow-node {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 24px;
+      text-align: center;
+      min-width: 160px;
+    }
+    .flow-node strong { display: block; margin-bottom: 2px; }
+    .flow-node span { color: var(--text-muted); font-size: 0.85em; }
+    .flow-arrow {
+      color: var(--text-muted);
+      font-size: 1.4em;
+      padding: 0 12px;
+    }
+
+    /* ── Features ────────────────────────────────────────── */
     .features {
-      padding: 60px 0;
+      padding: 80px 0;
       border-top: 1px solid var(--border);
     }
     .features h2 {
       text-align: center;
-      font-size: 1.8em;
-      margin-bottom: 40px;
+      font-size: 2em;
+      margin-bottom: 48px;
+      letter-spacing: -0.02em;
     }
     .feature-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
     }
     .feature {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
+      border-radius: 12px;
+      padding: 28px;
+      transition: border-color 0.2s;
     }
-    .feature h3 { font-size: 1.1em; margin-bottom: 8px; }
-    .feature p { color: var(--text-muted); font-size: 0.95em; }
+    .feature:hover { border-color: var(--border-hover); }
+    .feature-icon { font-size: 1.5em; margin-bottom: 12px; }
+    .feature h3 { font-size: 1.05em; margin-bottom: 8px; font-weight: 600; }
+    .feature p { color: var(--text-secondary); font-size: 0.9em; line-height: 1.5; }
 
-    /* Install */
-    .install {
-      padding: 60px 0;
+    /* ── Install section ─────────────────────────────────── */
+    .install-section {
+      padding: 80px 0;
       border-top: 1px solid var(--border);
     }
-    .install h2 {
+    .install-section h2 {
       text-align: center;
-      font-size: 1.8em;
-      margin-bottom: 12px;
-    }
-    .install .subtitle {
-      text-align: center;
-      color: var(--text-muted);
-      margin-bottom: 32px;
-    }
-    .install-script {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px 28px;
-      font-family: var(--mono);
-      font-size: 0.95em;
-      text-align: center;
-      margin-bottom: 32px;
-      position: relative;
-      cursor: pointer;
-    }
-    .install-script:hover { border-color: var(--accent); }
-    .install-script .hint {
-      font-family: var(--font);
-      color: var(--text-muted);
-      font-size: 0.8em;
-      margin-top: 8px;
+      font-size: 2em;
+      margin-bottom: 48px;
+      letter-spacing: -0.02em;
     }
     .platform-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 16px;
+      margin-bottom: 48px;
     }
     .platform {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
+      border-radius: 12px;
+      padding: 32px 24px;
       text-align: center;
-      transition: border-color 0.15s;
+      transition: all 0.2s;
+      display: block;
     }
-    .platform:hover { border-color: var(--accent); text-decoration: none; }
-    .platform .icon { font-size: 2em; margin-bottom: 12px; }
-    .platform h3 { font-size: 1.1em; margin-bottom: 4px; }
+    .platform:hover {
+      border-color: var(--accent);
+      text-decoration: none;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .platform .icon { font-size: 2.2em; margin-bottom: 14px; }
+    .platform h3 { font-size: 1.1em; margin-bottom: 6px; color: var(--text); }
     .platform p { color: var(--text-muted); font-size: 0.85em; }
 
-    /* Download table */
-    .downloads {
-      padding: 40px 0 60px;
-    }
-    .downloads h3 {
-      text-align: center;
-      font-size: 1.2em;
-      margin-bottom: 16px;
-      color: var(--text-muted);
-    }
     .dl-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.95em;
+      font-size: 0.9em;
     }
     .dl-table th {
       text-align: left;
-      padding: 10px 16px;
-      border-bottom: 2px solid var(--border);
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
       color: var(--text-muted);
       font-weight: 600;
+      font-size: 0.85em;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
     .dl-table td {
-      padding: 10px 16px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border);
     }
     .dl-table tr:hover td { background: var(--surface); }
-    .dl-table a { font-weight: 500; }
+    .dl-table a { font-weight: 500; font-family: var(--mono); font-size: 0.95em; }
 
-    /* Usage */
+    /* ── Usage ────────────────────────────────────────────── */
     .usage {
-      padding: 60px 0;
+      padding: 80px 0;
       border-top: 1px solid var(--border);
     }
     .usage h2 {
       text-align: center;
-      font-size: 1.8em;
-      margin-bottom: 32px;
+      font-size: 2em;
+      margin-bottom: 48px;
+      letter-spacing: -0.02em;
     }
     .usage-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
     }
     .usage-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
+      border-radius: 12px;
+      padding: 28px;
+      transition: border-color 0.2s;
     }
+    .usage-card:hover { border-color: var(--border-hover); }
     .usage-card h3 {
-      font-size: 1em;
+      font-size: 0.85em;
       color: var(--text-muted);
-      margin-bottom: 12px;
+      margin-bottom: 16px;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
       font-weight: 600;
     }
     .usage-card pre {
-      background: var(--code-bg);
-      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
       padding: 16px;
       overflow-x: auto;
-      font-size: 0.9em;
-      line-height: 1.6;
+      font-size: 0.88em;
+      line-height: 1.7;
     }
     .usage-card pre code {
       background: none;
       padding: 0;
+      border: none;
+      color: var(--green);
     }
+    .usage-card pre .comment { color: var(--text-muted); }
 
-    /* Footer */
+    /* ── Footer ───────────────────────────────────────────── */
     .footer {
       border-top: 1px solid var(--border);
-      padding: 32px 0;
+      padding: 40px 0;
       text-align: center;
+    }
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+    .footer-links a {
+      color: var(--text-secondary);
+      font-size: 0.9em;
+      font-weight: 500;
+    }
+    .footer-links a:hover { color: var(--text); }
+    .footer-legal {
       color: var(--text-muted);
-      font-size: 0.85em;
-      line-height: 1.8;
+      font-size: 0.8em;
+      line-height: 1.7;
+      max-width: 600px;
+      margin: 0 auto;
     }
 
-    /* Responsive */
-    @media (max-width: 700px) {
-      .hero h1 { font-size: 2em; }
+    /* ── Responsive ───────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .hero { padding: 60px 0 40px; }
+      .hero h1 { font-size: 2.5em; }
       .hero .subtitle { font-size: 1.05em; }
-      .hero-code { font-size: 0.8em; padding: 14px 16px; }
+      .feature-grid { grid-template-columns: 1fr; }
       .platform-grid { grid-template-columns: 1fr; }
       .usage-grid { grid-template-columns: 1fr; }
-      .nav a { margin-left: 16px; font-size: 0.85em; }
+      .flow { flex-direction: column; gap: 8px; }
+      .flow-arrow { transform: rotate(90deg); padding: 4px 0; }
+      .install-box { border-radius: 12px; }
+      .os-tabs { flex-wrap: wrap; }
+      .os-tab { flex: 1; text-align: center; min-width: 80px; }
     }
   </style>
 </head>
@@ -306,23 +463,88 @@
 <!-- Hero -->
 <section class="hero">
   <div class="container">
+    <div class="badge"><span class="badge-dot"></span> v1.0.0 &mdash; Open Source</div>
     <h1>clawgate</h1>
     <p class="subtitle">
-      Single-binary proxy that lets Anthropic-format clients use
-      OpenAI-compatible backends. Zero dependencies. Pure Go.
+      Single-binary proxy that translates Anthropic API format to OpenAI.
+      Use Claude Code with ChatGPT, OpenAI API, Azure, vLLM, and more.
     </p>
-    <div class="hero-code">
-      <span class="comment"># install</span><br>
-      <span class="cmd">curl -fsSL clawgate.org/install.sh | bash</span><br><br>
-      <span class="comment"># login &amp; run</span><br>
-      <span class="cmd">clawgate login</span><br>
-      <span class="cmd">clawgate</span><br><br>
-      <span class="comment"># connect Claude Code</span><br>
-      <span class="cmd">ANTHROPIC_BASE_URL=http://localhost:8082 claude</span>
+
+    <!-- OS-aware install command -->
+    <div class="install-hero">
+      <div class="os-tabs">
+        <button class="os-tab active" data-os="mac">macOS</button>
+        <button class="os-tab" data-os="linux">Linux</button>
+        <button class="os-tab" data-os="windows">Windows</button>
+      </div>
+      <div class="install-box">
+        <button class="copy-btn" id="copyBtn">Copy</button>
+
+        <div class="install-pane active" data-os="mac">
+          <div class="install-cmd">
+            <span class="comment"># install</span><br>
+            <span class="prompt">$ </span>curl -fsSL clawgate.org/install.sh | bash<br><br>
+            <span class="comment"># run</span><br>
+            <span class="prompt">$ </span>clawgate login<br>
+            <span class="prompt">$ </span>clawgate<br><br>
+            <span class="comment"># connect Claude Code</span><br>
+            <span class="prompt">$ </span>ANTHROPIC_BASE_URL=http://localhost:8082 claude
+          </div>
+        </div>
+
+        <div class="install-pane" data-os="linux">
+          <div class="install-cmd">
+            <span class="comment"># install</span><br>
+            <span class="prompt">$ </span>curl -fsSL clawgate.org/install.sh | bash<br><br>
+            <span class="comment"># run</span><br>
+            <span class="prompt">$ </span>clawgate login<br>
+            <span class="prompt">$ </span>clawgate<br><br>
+            <span class="comment"># connect Claude Code</span><br>
+            <span class="prompt">$ </span>ANTHROPIC_BASE_URL=http://localhost:8082 claude
+          </div>
+        </div>
+
+        <div class="install-pane" data-os="windows">
+          <div class="install-cmd">
+            <span class="comment"># install (PowerShell)</span><br>
+            <span class="prompt">PS&gt; </span>irm clawgate.org/install.ps1 | iex<br><br>
+            <span class="comment"># run (open a new terminal)</span><br>
+            <span class="prompt">PS&gt; </span>clawgate login<br>
+            <span class="prompt">PS&gt; </span>clawgate<br><br>
+            <span class="comment"># connect Claude Code</span><br>
+            <span class="prompt">PS&gt; </span>$env:ANTHROPIC_BASE_URL="http://localhost:8082"; claude
+          </div>
+        </div>
+      </div>
     </div>
+
     <div class="buttons">
       <a href="#install" class="btn btn-primary">Download</a>
       <a href="https://github.com/goclawgate/clawgate" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="how-it-works">
+  <div class="container">
+    <h2>How it works</h2>
+    <p class="subtitle">clawgate sits between your Anthropic client and any OpenAI-compatible backend.</p>
+    <div class="flow">
+      <div class="flow-node">
+        <strong>Claude Code</strong>
+        <span>Anthropic format</span>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node" style="border-color: var(--accent);">
+        <strong style="color: var(--accent);">clawgate</strong>
+        <span>translates</span>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node">
+        <strong>OpenAI backend</strong>
+        <span>ChatGPT / API / Azure / vLLM</span>
+      </div>
     </div>
   </div>
 </section>
@@ -333,52 +555,45 @@
     <h2>Features</h2>
     <div class="feature-grid">
       <div class="feature">
+        <div class="feature-icon">&#x1F510;</div>
         <h3>Dual Mode</h3>
-        <p>Use your ChatGPT Plus/Pro subscription via OAuth (no API key needed), or bring a standard OpenAI API key.</p>
+        <p>Use your ChatGPT Plus/Pro subscription via OAuth, or bring a standard OpenAI API key. No vendor lock-in.</p>
       </div>
       <div class="feature">
+        <div class="feature-icon">&#x26A1;</div>
         <h3>Single Binary</h3>
-        <p>~6 MB, no runtime, no dependencies. Download and run. Available for Linux, macOS, and Windows on amd64 and arm64.</p>
+        <p>~6 MB, no runtime, zero dependencies. Download and run. Cross-platform: Linux, macOS, Windows.</p>
       </div>
       <div class="feature">
+        <div class="feature-icon">&#x1F504;</div>
         <h3>Full Streaming</h3>
-        <p>SSE streaming with error handling, parallel tool calls, and reasoning model support. Everything translates cleanly.</p>
+        <p>SSE streaming with error handling, parallel tool calls, and reasoning model support.</p>
       </div>
       <div class="feature">
-        <h3>Any OpenAI Backend</h3>
-        <p>Works with OpenAI API, ChatGPT, Azure OpenAI, vLLM, Ollama, or any endpoint that speaks the OpenAI Chat Completions format.</p>
+        <div class="feature-icon">&#x1F30D;</div>
+        <h3>Any Backend</h3>
+        <p>OpenAI API, ChatGPT, Azure OpenAI, vLLM, Ollama, or any OpenAI Chat Completions endpoint.</p>
       </div>
       <div class="feature">
+        <div class="feature-icon">&#x1F527;</div>
         <h3>Tool Calls</h3>
-        <p>Complete tool_use round-trip translation, including parallel tool calls. Claude Code's MCP tools work out of the box.</p>
+        <p>Complete tool_use round-trip translation, including parallel tool calls. MCP tools work out of the box.</p>
       </div>
       <div class="feature">
+        <div class="feature-icon">&#x2699;&#xFE0F;</div>
         <h3>Zero Config</h3>
-        <p>Sensible defaults for everything. Run <code>clawgate login</code> once, then just <code>clawgate</code>. Override anything via CLI flags or env vars.</p>
+        <p>Sensible defaults. Run <code>clawgate login</code> once, then just <code>clawgate</code>. Override with flags or env vars.</p>
       </div>
     </div>
   </div>
 </section>
 
 <!-- Install -->
-<section class="install" id="install">
+<section class="install-section" id="install">
   <div class="container">
     <h2>Install</h2>
-    <p class="subtitle">One command. Auto-detects your OS and architecture.</p>
 
-    <div class="install-script" onclick="navigator.clipboard.writeText('curl -fsSL clawgate.org/install.sh | bash').then(()=>{this.querySelector('.hint').textContent='Copied!'})">
-      <div style="color:var(--text-muted);font-size:0.85em;margin-bottom:6px">Linux / macOS</div>
-      curl -fsSL clawgate.org/install.sh | bash
-      <div class="hint">click to copy</div>
-    </div>
-
-    <div class="install-script" style="margin-top:12px" onclick="navigator.clipboard.writeText('irm clawgate.org/install.ps1 | iex').then(()=>{this.querySelector('.hint').textContent='Copied!'})">
-      <div style="color:var(--text-muted);font-size:0.85em;margin-bottom:6px">Windows (PowerShell)</div>
-      irm clawgate.org/install.ps1 | iex
-      <div class="hint">click to copy</div>
-    </div>
-
-    <div class="platform-grid" style="margin-top:32px">
+    <div class="platform-grid">
       <a href="install-linux.html" class="platform">
         <div class="icon">&#x1F427;</div>
         <h3>Linux</h3>
@@ -396,42 +611,33 @@
       </a>
     </div>
 
-    <!-- Direct downloads -->
-    <div class="downloads">
-      <h3>Direct Downloads</h3>
-      <table class="dl-table">
-        <thead>
-          <tr><th>Platform</th><th>Architecture</th><th>Download</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Linux</td>
-            <td>x86_64</td>
-            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-linux-amd64">clawgate-linux-amd64</a></td>
-          </tr>
-          <tr>
-            <td>Linux</td>
-            <td>ARM64</td>
-            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-linux-arm64">clawgate-linux-arm64</a></td>
-          </tr>
-          <tr>
-            <td>macOS</td>
-            <td>Intel (x86_64)</td>
-            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-darwin-amd64">clawgate-darwin-amd64</a></td>
-          </tr>
-          <tr>
-            <td>macOS</td>
-            <td>Apple Silicon (ARM64)</td>
-            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-darwin-arm64">clawgate-darwin-arm64</a></td>
-          </tr>
-          <tr>
-            <td>Windows</td>
-            <td>x86_64</td>
-            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-windows-amd64.exe">clawgate-windows-amd64.exe</a></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <table class="dl-table">
+      <thead>
+        <tr><th>Platform</th><th>Architecture</th><th>Download</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Linux</td><td>x86_64</td>
+          <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-linux-amd64">clawgate-linux-amd64</a></td>
+        </tr>
+        <tr>
+          <td>Linux</td><td>ARM64</td>
+          <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-linux-arm64">clawgate-linux-arm64</a></td>
+        </tr>
+        <tr>
+          <td>macOS</td><td>Intel</td>
+          <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-darwin-amd64">clawgate-darwin-amd64</a></td>
+        </tr>
+        <tr>
+          <td>macOS</td><td>Apple Silicon</td>
+          <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-darwin-arm64">clawgate-darwin-arm64</a></td>
+        </tr>
+        <tr>
+          <td>Windows</td><td>x86_64</td>
+          <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-windows-amd64.exe">clawgate-windows-amd64.exe</a></td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -442,26 +648,26 @@
     <div class="usage-grid">
       <div class="usage-card">
         <h3>ChatGPT Mode (default)</h3>
-        <pre><code><span style="color:#8b949e"># One-time login</span>
+        <pre><code><span class="comment"># one-time login</span>
 clawgate login
 
-<span style="color:#8b949e"># Start the proxy</span>
+<span class="comment"># start the proxy</span>
 clawgate
 
-<span style="color:#8b949e"># In another terminal</span>
+<span class="comment"># connect Claude Code</span>
 ANTHROPIC_BASE_URL=http://localhost:8082 claude</code></pre>
       </div>
       <div class="usage-card">
         <h3>API Key Mode</h3>
-        <pre><code><span style="color:#8b949e"># OpenAI API</span>
+        <pre><code><span class="comment"># OpenAI API</span>
 clawgate --mode=api --apiKey=sk-xxx
 
-<span style="color:#8b949e"># Custom endpoint (Azure, vLLM, etc.)</span>
+<span class="comment"># custom endpoint</span>
 clawgate --mode=api \
   --apiKey=sk-xxx \
   --baseUrl=https://my.endpoint/v1
 
-<span style="color:#8b949e"># In another terminal</span>
+<span class="comment"># connect Claude Code</span>
 ANTHROPIC_BASE_URL=http://localhost:8082 claude</code></pre>
       </div>
     </div>
@@ -471,17 +677,61 @@ ANTHROPIC_BASE_URL=http://localhost:8082 claude</code></pre>
 <!-- Footer -->
 <footer class="footer">
   <div class="container">
-    <p>
-      <a href="https://github.com/goclawgate/clawgate">GitHub</a> &middot;
-      <a href="https://github.com/goclawgate/clawgate/releases">Releases</a> &middot;
+    <div class="footer-links">
+      <a href="https://github.com/goclawgate/clawgate">GitHub</a>
+      <a href="https://github.com/goclawgate/clawgate/releases">Releases</a>
       <a href="usage.html">Docs</a>
-    </p>
-    <p style="margin-top: 12px;">
+      <a href="https://github.com/goclawgate/clawgate/issues">Issues</a>
+    </div>
+    <p class="footer-legal">
       clawgate is an independent open-source project, not affiliated with or endorsed by OpenAI or Anthropic.<br>
       "Claude" and "Claude Code" are trademarks of Anthropic PBC. "ChatGPT" and "OpenAI" are trademarks of OpenAI, Inc.
     </p>
   </div>
 </footer>
+
+<script>
+// ── OS Detection ──────────────────────────────────────────────────
+(function() {
+  var ua = navigator.userAgent.toLowerCase();
+  var os = 'linux';
+  if (ua.indexOf('mac') !== -1) os = 'mac';
+  else if (ua.indexOf('win') !== -1) os = 'windows';
+
+  // Activate the right tab
+  var tabs = document.querySelectorAll('.os-tab');
+  var panes = document.querySelectorAll('.install-pane');
+
+  function activate(target) {
+    tabs.forEach(function(t) { t.classList.toggle('active', t.getAttribute('data-os') === target); });
+    panes.forEach(function(p) { p.classList.toggle('active', p.getAttribute('data-os') === target); });
+  }
+
+  activate(os);
+
+  tabs.forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      activate(this.getAttribute('data-os'));
+    });
+  });
+
+  // Copy button
+  var copyCommands = {
+    mac: 'curl -fsSL clawgate.org/install.sh | bash',
+    linux: 'curl -fsSL clawgate.org/install.sh | bash',
+    windows: 'irm clawgate.org/install.ps1 | iex'
+  };
+
+  var copyBtn = document.getElementById('copyBtn');
+  copyBtn.addEventListener('click', function() {
+    var activeOs = document.querySelector('.os-tab.active').getAttribute('data-os');
+    navigator.clipboard.writeText(copyCommands[activeOs]).then(function() {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+    });
+  });
+})();
+</script>
 
 </body>
 </html>
