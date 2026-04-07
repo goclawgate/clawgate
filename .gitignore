@@ -1,0 +1,12 @@
+clawgate
+clawgate.exe
+builds/
+.env
+
+# SSH keys
+.ssh_key/
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml

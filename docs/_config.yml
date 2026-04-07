@@ -1,0 +1,10 @@
+title: clawgate
+description: Run Anthropic-format clients against OpenAI-compatible backends
+url: https://clawgate.org
+baseurl: ""
+theme: null
+plugins: []
+markdown: kramdown
+exclude:
+  - CNAME
+  - _config.yml

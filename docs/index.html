@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>clawgate — Anthropic-to-OpenAI proxy</title>
+  <meta name="description" content="Single-binary Go proxy that lets Anthropic-format clients use OpenAI-compatible backends. Use Claude Code with ChatGPT, OpenAI API, Azure, vLLM, and more.">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --green: #3fb950;
+      --orange: #d29922;
+      --code-bg: #0d1117;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+    code {
+      font-family: var(--mono);
+      background: var(--surface);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    /* Header */
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+    }
+    .header .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      font-size: 1.4em;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .logo:hover { text-decoration: none; }
+    .nav a {
+      color: var(--text-muted);
+      margin-left: 24px;
+      font-size: 0.95em;
+    }
+    .nav a:hover { color: var(--text); }
+
+    /* Container */
+    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 0 60px;
+    }
+    .hero h1 {
+      font-size: 3em;
+      font-weight: 800;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .hero .subtitle {
+      font-size: 1.25em;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 40px;
+    }
+    .hero-code {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 28px;
+      display: inline-block;
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 0.95em;
+      line-height: 1.8;
+      margin-bottom: 40px;
+    }
+    .hero-code .comment { color: var(--text-muted); }
+    .hero-code .cmd { color: var(--green); }
+
+    /* Buttons */
+    .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 1em;
+      font-weight: 600;
+      text-decoration: none !important;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg) !important;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text) !important;
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--text-muted); }
+
+    /* Features */
+    .features {
+      padding: 60px 0;
+      border-top: 1px solid var(--border);
+    }
+    .features h2 {
+      text-align: center;
+      font-size: 1.8em;
+      margin-bottom: 40px;
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+    }
+    .feature h3 { font-size: 1.1em; margin-bottom: 8px; }
+    .feature p { color: var(--text-muted); font-size: 0.95em; }
+
+    /* Install */
+    .install {
+      padding: 60px 0;
+      border-top: 1px solid var(--border);
+    }
+    .install h2 {
+      text-align: center;
+      font-size: 1.8em;
+      margin-bottom: 12px;
+    }
+    .install .subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+    .install-script {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 28px;
+      font-family: var(--mono);
+      font-size: 0.95em;
+      text-align: center;
+      margin-bottom: 32px;
+      position: relative;
+      cursor: pointer;
+    }
+    .install-script:hover { border-color: var(--accent); }
+    .install-script .hint {
+      font-family: var(--font);
+      color: var(--text-muted);
+      font-size: 0.8em;
+      margin-top: 8px;
+    }
+    .platform-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .platform {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      text-align: center;
+      transition: border-color 0.15s;
+    }
+    .platform:hover { border-color: var(--accent); text-decoration: none; }
+    .platform .icon { font-size: 2em; margin-bottom: 12px; }
+    .platform h3 { font-size: 1.1em; margin-bottom: 4px; }
+    .platform p { color: var(--text-muted); font-size: 0.85em; }
+
+    /* Download table */
+    .downloads {
+      padding: 40px 0 60px;
+    }
+    .downloads h3 {
+      text-align: center;
+      font-size: 1.2em;
+      margin-bottom: 16px;
+      color: var(--text-muted);
+    }
+    .dl-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95em;
+    }
+    .dl-table th {
+      text-align: left;
+      padding: 10px 16px;
+      border-bottom: 2px solid var(--border);
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .dl-table td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .dl-table tr:hover td { background: var(--surface); }
+    .dl-table a { font-weight: 500; }
+
+    /* Usage */
+    .usage {
+      padding: 60px 0;
+      border-top: 1px solid var(--border);
+    }
+    .usage h2 {
+      text-align: center;
+      font-size: 1.8em;
+      margin-bottom: 32px;
+    }
+    .usage-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+    }
+    .usage-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+    }
+    .usage-card h3 {
+      font-size: 1em;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+    .usage-card pre {
+      background: var(--code-bg);
+      border-radius: 6px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 0.9em;
+      line-height: 1.6;
+    }
+    .usage-card pre code {
+      background: none;
+      padding: 0;
+    }
+
+    /* Footer */
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85em;
+      line-height: 1.8;
+    }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      .hero h1 { font-size: 2em; }
+      .hero .subtitle { font-size: 1.05em; }
+      .hero-code { font-size: 0.8em; padding: 14px 16px; }
+      .platform-grid { grid-template-columns: 1fr; }
+      .usage-grid { grid-template-columns: 1fr; }
+      .nav a { margin-left: 16px; font-size: 0.85em; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="container">
+    <a href="/" class="logo">clawgate</a>
+    <nav class="nav">
+      <a href="#install">Install</a>
+      <a href="usage.html">Docs</a>
+      <a href="https://github.com/goclawgate/clawgate">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <h1>clawgate</h1>
+    <p class="subtitle">
+      Single-binary proxy that lets Anthropic-format clients use
+      OpenAI-compatible backends. Zero dependencies. Pure Go.
+    </p>
+    <div class="hero-code">
+      <span class="comment"># install</span><br>
+      <span class="cmd">curl -fsSL clawgate.org/install.sh | bash</span><br><br>
+      <span class="comment"># login &amp; run</span><br>
+      <span class="cmd">clawgate login</span><br>
+      <span class="cmd">clawgate</span><br><br>
+      <span class="comment"># connect Claude Code</span><br>
+      <span class="cmd">ANTHROPIC_BASE_URL=http://localhost:8082 claude</span>
+    </div>
+    <div class="buttons">
+      <a href="#install" class="btn btn-primary">Download</a>
+      <a href="https://github.com/goclawgate/clawgate" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features">
+  <div class="container">
+    <h2>Features</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>Dual Mode</h3>
+        <p>Use your ChatGPT Plus/Pro subscription via OAuth (no API key needed), or bring a standard OpenAI API key.</p>
+      </div>
+      <div class="feature">
+        <h3>Single Binary</h3>
+        <p>~6 MB, no runtime, no dependencies. Download and run. Available for Linux, macOS, and Windows on amd64 and arm64.</p>
+      </div>
+      <div class="feature">
+        <h3>Full Streaming</h3>
+        <p>SSE streaming with error handling, parallel tool calls, and reasoning model support. Everything translates cleanly.</p>
+      </div>
+      <div class="feature">
+        <h3>Any OpenAI Backend</h3>
+        <p>Works with OpenAI API, ChatGPT, Azure OpenAI, vLLM, Ollama, or any endpoint that speaks the OpenAI Chat Completions format.</p>
+      </div>
+      <div class="feature">
+        <h3>Tool Calls</h3>
+        <p>Complete tool_use round-trip translation, including parallel tool calls. Claude Code's MCP tools work out of the box.</p>
+      </div>
+      <div class="feature">
+        <h3>Zero Config</h3>
+        <p>Sensible defaults for everything. Run <code>clawgate login</code> once, then just <code>clawgate</code>. Override anything via CLI flags or env vars.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Install -->
+<section class="install" id="install">
+  <div class="container">
+    <h2>Install</h2>
+    <p class="subtitle">One command. Auto-detects your OS and architecture.</p>
+
+    <div class="install-script" onclick="navigator.clipboard.writeText('curl -fsSL clawgate.org/install.sh | bash').then(()=>{this.querySelector('.hint').textContent='Copied!'})">
+      <div style="color:var(--text-muted);font-size:0.85em;margin-bottom:6px">Linux / macOS</div>
+      curl -fsSL clawgate.org/install.sh | bash
+      <div class="hint">click to copy</div>
+    </div>
+
+    <div class="install-script" style="margin-top:12px" onclick="navigator.clipboard.writeText('irm clawgate.org/install.ps1 | iex').then(()=>{this.querySelector('.hint').textContent='Copied!'})">
+      <div style="color:var(--text-muted);font-size:0.85em;margin-bottom:6px">Windows (PowerShell)</div>
+      irm clawgate.org/install.ps1 | iex
+      <div class="hint">click to copy</div>
+    </div>
+
+    <div class="platform-grid" style="margin-top:32px">
+      <a href="install-linux.html" class="platform">
+        <div class="icon">&#x1F427;</div>
+        <h3>Linux</h3>
+        <p>x86_64 &amp; ARM64</p>
+      </a>
+      <a href="install-macos.html" class="platform">
+        <div class="icon">&#x1F34E;</div>
+        <h3>macOS</h3>
+        <p>Intel &amp; Apple Silicon</p>
+      </a>
+      <a href="install-windows.html" class="platform">
+        <div class="icon">&#x1FA9F;</div>
+        <h3>Windows</h3>
+        <p>x86_64</p>
+      </a>
+    </div>
+
+    <!-- Direct downloads -->
+    <div class="downloads">
+      <h3>Direct Downloads</h3>
+      <table class="dl-table">
+        <thead>
+          <tr><th>Platform</th><th>Architecture</th><th>Download</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Linux</td>
+            <td>x86_64</td>
+            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-linux-amd64">clawgate-linux-amd64</a></td>
+          </tr>
+          <tr>
+            <td>Linux</td>
+            <td>ARM64</td>
+            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-linux-arm64">clawgate-linux-arm64</a></td>
+          </tr>
+          <tr>
+            <td>macOS</td>
+            <td>Intel (x86_64)</td>
+            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-darwin-amd64">clawgate-darwin-amd64</a></td>
+          </tr>
+          <tr>
+            <td>macOS</td>
+            <td>Apple Silicon (ARM64)</td>
+            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-darwin-arm64">clawgate-darwin-arm64</a></td>
+          </tr>
+          <tr>
+            <td>Windows</td>
+            <td>x86_64</td>
+            <td><a href="https://github.com/goclawgate/clawgate/releases/latest/download/clawgate-windows-amd64.exe">clawgate-windows-amd64.exe</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Usage -->
+<section class="usage">
+  <div class="container">
+    <h2>Quick Start</h2>
+    <div class="usage-grid">
+      <div class="usage-card">
+        <h3>ChatGPT Mode (default)</h3>
+        <pre><code><span style="color:#8b949e"># One-time login</span>
+clawgate login
+
+<span style="color:#8b949e"># Start the proxy</span>
+clawgate
+
+<span style="color:#8b949e"># In another terminal</span>
+ANTHROPIC_BASE_URL=http://localhost:8082 claude</code></pre>
+      </div>
+      <div class="usage-card">
+        <h3>API Key Mode</h3>
+        <pre><code><span style="color:#8b949e"># OpenAI API</span>
+clawgate --mode=api --apiKey=sk-xxx
+
+<span style="color:#8b949e"># Custom endpoint (Azure, vLLM, etc.)</span>
+clawgate --mode=api \
+  --apiKey=sk-xxx \
+  --baseUrl=https://my.endpoint/v1
+
+<span style="color:#8b949e"># In another terminal</span>
+ANTHROPIC_BASE_URL=http://localhost:8082 claude</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container">
+    <p>
+      <a href="https://github.com/goclawgate/clawgate">GitHub</a> &middot;
+      <a href="https://github.com/goclawgate/clawgate/releases">Releases</a> &middot;
+      <a href="usage.html">Docs</a>
+    </p>
+    <p style="margin-top: 12px;">
+      clawgate is an independent open-source project, not affiliated with or endorsed by OpenAI or Anthropic.<br>
+      "Claude" and "Claude Code" are trademarks of Anthropic PBC. "ChatGPT" and "OpenAI" are trademarks of OpenAI, Inc.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
