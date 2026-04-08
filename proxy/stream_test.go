@@ -64,6 +64,41 @@ func TestHandleStreamCodexParallelToolCalls(t *testing.T) {
 	}
 }
 
+// TestHandleStreamCodexReasoningStopReason ensures that a Codex
+// response containing reasoning summary deltas (but no tool calls) is
+// finalized with stop_reason: "end_turn", NOT "tool_use". Before the
+// fix, reasoning blocks incremented lastAnthropicIdx which was used to
+// decide the stop reason, so a reasoning-only response was incorrectly
+// tagged as "tool_use" — leading Anthropic clients to expect a
+// tool_result and break the conversation.
+func TestHandleStreamCodexReasoningStopReason(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"Thinking about the problem..."}`,
+		`data: {"type":"response.reasoning_summary_text.delta","delta":" more thoughts."}`,
+		`data: {"type":"response.reasoning_summary_text.done"}`,
+		`data: {"type":"response.output_text.delta","delta":"Here is the answer."}`,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		``,
+	}, "\n\n")
+
+	w := httptest.NewRecorder()
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true)
+	out := w.Body.String()
+
+	// Must contain thinking block (so we know reasoning was handled).
+	if !strings.Contains(out, `"type":"thinking"`) {
+		t.Errorf("expected thinking content block in stream:\n%s", out)
+	}
+	// Must NOT have stop_reason tool_use — reasoning is not a tool call.
+	if strings.Contains(out, `"stop_reason":"tool_use"`) {
+		t.Errorf("reasoning-only response must not have stop_reason=tool_use:\n%s", out)
+	}
+	// Must have end_turn stop reason.
+	if !strings.Contains(out, `"stop_reason":"end_turn"`) {
+		t.Errorf("expected stop_reason=end_turn for reasoning-only response:\n%s", out)
+	}
+}
+
 // TestHandleStreamCodexSingleToolCall is a sanity check that the
 // item_id routing still works for the common single-tool case.
 func TestHandleStreamCodexSingleToolCall(t *testing.T) {

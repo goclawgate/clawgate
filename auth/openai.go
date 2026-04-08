@@ -18,6 +18,12 @@ const (
 	CodexEndpoint = "https://chatgpt.com/backend-api/codex/responses"
 	PollMarginMs  = 3000
 	Version       = "1.0.0"
+
+	// tokenExpiryBuffer is the window (in seconds) before the true
+	// token expiry where we proactively refresh. Five minutes gives
+	// ample time for the refresh round-trip to complete before the
+	// access token actually lapses.
+	tokenExpiryBuffer = 300
 )
 
 // Issuer is the OAuth token/device-auth endpoint base. It is a var
@@ -34,7 +40,7 @@ type Token struct {
 
 // IsExpired checks if the access token needs refresh.
 func (t *Token) IsExpired() bool {
-	return time.Now().Unix() > t.ExpiresAt-300 // 5 min buffer
+	return time.Now().Unix() > t.ExpiresAt-tokenExpiryBuffer
 }
 
 // ── Device Flow ──────────────────────────────────────────────────────
@@ -99,14 +105,24 @@ func Login() (*Token, error) {
 	}
 	interval := time.Duration(intervalSec)*time.Second + time.Duration(PollMarginMs)*time.Millisecond
 
-	deadline := time.Now().Add(5 * time.Minute)
+	const deviceFlowTimeout = 5 * time.Minute
+	const maxConsecutiveErrors = 5
+
+	deadline := time.Now().Add(deviceFlowTimeout)
+	consecutiveErrors := 0
 	for time.Now().Before(deadline) {
 		time.Sleep(interval)
 
 		tokenResp, status, err := pollDeviceToken(device.DeviceAuthID, device.UserCode)
 		if err != nil {
+			consecutiveErrors++
+			fmt.Printf("  ⚠️  Poll error: %v (retrying...)\n", err)
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return nil, fmt.Errorf("device flow aborted after %d consecutive poll errors: %w", consecutiveErrors, err)
+			}
 			continue
 		}
+		consecutiveErrors = 0
 
 		if status == 200 && tokenResp != nil {
 			// Step 4: Exchange code for tokens
@@ -134,9 +150,10 @@ func Login() (*Token, error) {
 
 			if err := SaveToken(token); err != nil {
 				fmt.Printf("  ⚠️  Could not save token: %v\n", err)
+				fmt.Println("  ✅ Authenticated (token NOT persisted — will need re-login)")
+			} else {
+				fmt.Println("  ✅ Authenticated successfully!")
 			}
-
-			fmt.Println("  ✅ Authenticated successfully!")
 			return token, nil
 		}
 

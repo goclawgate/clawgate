@@ -13,7 +13,7 @@ Anthropic client → (Anthropic format) → clawgate → (OpenAI format) → Ope
 - **Single binary** — ~6MB, no runtime needed.
 - **Streaming** — full SSE streaming support with error handling.
 - **Tool calls** — complete tool_use round-trip translation.
-- **Cross-platform** — Linux, macOS, Windows (amd64 & arm64).
+- **Cross-platform** — Linux (amd64 & arm64), macOS (amd64 & arm64), Windows (amd64).
 
 ## Install
 
@@ -132,7 +132,7 @@ Cross-compile all platforms:
 
 ```bash
 make release
-# Output: builds/clawgate-{linux,darwin,windows}-{amd64,arm64}
+# Output: builds/clawgate-{linux,darwin}-{amd64,arm64} and builds/clawgate-windows-amd64.exe
 ```
 
 ## Disclaimer

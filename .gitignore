@@ -2,6 +2,7 @@ clawgate
 clawgate.exe
 builds/
 .env
+.claude
 
 # SSH keys
 .ssh_key/

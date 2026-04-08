@@ -26,7 +26,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "❌ Login failed: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("\n  Token saved. Account ID: %s\n", token.AccountID)
+			fmt.Printf("\n  Login complete. Account ID: %s\n", token.AccountID)
 			fmt.Println("  Run './clawgate' to start the proxy.")
 			fmt.Println()
 			return

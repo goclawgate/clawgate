@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -90,6 +89,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 		textBlockClosed     bool
 		currentToolIdx      *int
 		lastAnthropicIdx    int
+		toolBlockCount      int            // number of tool_use blocks opened (for stop reason)
 		inputTokens         int
 		outputTokens        int
 		cachedTokens        int
@@ -117,7 +117,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 		}
 
 		if isChatGPT {
-			if os.Getenv("DEBUG") == "1" {
+			if debug {
 				fmt.Println("CODEX STRM:", data)
 			}
 			// We translate Codex SSE chunk to Anthropic SSE format
@@ -156,6 +156,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 					// clients echo back on tool_result.
 					itemID, _ := item["id"].(string)
 					lastAnthropicIdx++
+					toolBlockCount++
 					if codexItemToBlockIdx == nil {
 						codexItemToBlockIdx = map[string]int{}
 					}
@@ -228,7 +229,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 				return
 
 			case "response.function_call_arguments.done":
-				if os.Getenv("DEBUG") == "1" {
+				if debug {
 					fmt.Println("CODEX STRM: function_call_arguments.done (complete)")
 				}
 
@@ -290,7 +291,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 					reason := "end_turn"
 					if cType == "response.incomplete" {
 						reason = "max_tokens"
-					} else if lastAnthropicIdx > 0 {
+					} else if toolBlockCount > 0 {
 						reason = "tool_use"
 					}
 
@@ -348,6 +349,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 				if !known {
 					// New tool call — assign an Anthropic block index
 					lastAnthropicIdx++
+					toolBlockCount++
 					anthIdx = lastAnthropicIdx
 					toolIndexMap[tc.Index] = anthIdx
 					currentToolIdx = &tc.Index
@@ -457,13 +459,16 @@ func finalizeStream(w http.ResponseWriter, f http.Flusher, textBlockClosed bool,
 }
 
 func writeSSE(w http.ResponseWriter, f http.Flusher, event string, data interface{}) {
-	b, _ := json.Marshal(data)
+	b, err := json.Marshal(data)
+	if err != nil {
+		return // skip this event; don't send malformed data
+	}
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, string(b))
 	f.Flush()
 }
 
 func randomHex(n int) string {
-	b := make([]byte, n)
+	b := make([]byte, (n+1)/2)
 	crand.Read(b)
 	return hex.EncodeToString(b)[:n]
 }

@@ -19,12 +19,17 @@ import (
 	"github.com/goclawgate/clawgate/config"
 )
 
+// debug is evaluated once at startup so per-request hot paths don't
+// pay the cost of re-reading the environment on every call.
+var debug = os.Getenv("DEBUG") == "1"
+
 // Handler holds the proxy HTTP handlers.
 type Handler struct {
-	Cfg     *config.Config
-	Client  *http.Client
-	mu      sync.RWMutex
-	session string // lazily generated per-process session id
+	Cfg         *config.Config
+	Client      *http.Client
+	mu          sync.RWMutex
+	sessionOnce sync.Once
+	session     string // lazily generated per-process session id
 }
 
 // randomSessionID returns a UUID-shaped random string suitable for use
@@ -62,40 +67,53 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 // getToken returns a valid access token, refreshing if needed (ChatGPT mode).
+//
+// Refresh is guarded by the handler's write lock with a double-check so
+// that multiple concurrent requests arriving while the token is expired
+// don't all call auth.Refresh — only the first goroutine to acquire the
+// write lock actually talks to the OAuth server; the rest observe the
+// freshly refreshed token on re-check and return immediately.
 func (h *Handler) getToken() (string, string, error) {
-	h.mu.RLock()
-	accessToken := h.Cfg.AccessToken
-	accountID := h.Cfg.AccountID
-	h.mu.RUnlock()
-
 	if !h.Cfg.IsChatGPT() {
 		return h.Cfg.OpenAIAPIKey, "", nil
 	}
 
-	// Check if we need to load/refresh
+	// Fast path: read the current token under the read lock.
+	h.mu.RLock()
 	token, err := auth.LoadToken()
+	h.mu.RUnlock()
 	if err != nil {
 		return "", "", fmt.Errorf("no saved token — run './clawgate login' first")
 	}
 
 	if token.IsExpired() {
-		fmt.Println("🔄 Refreshing access token...")
-		newToken, err := auth.Refresh(token)
+		// Slow path: acquire the write lock, then re-check. If another
+		// goroutine already refreshed the token while we were waiting,
+		// we'll see the fresh value here and skip the refresh.
+		h.mu.Lock()
+		token, err = auth.LoadToken()
 		if err != nil {
-			return "", "", fmt.Errorf("token refresh failed: %w", err)
+			h.mu.Unlock()
+			return "", "", fmt.Errorf("no saved token — run './clawgate login' first")
 		}
-		auth.SaveToken(newToken)
-		token = newToken
+		if token.IsExpired() {
+			fmt.Println("🔄 Refreshing access token...")
+			newToken, refreshErr := auth.Refresh(token)
+			if refreshErr != nil {
+				h.mu.Unlock()
+				return "", "", fmt.Errorf("token refresh failed: %w", refreshErr)
+			}
+			if saveErr := auth.SaveToken(newToken); saveErr != nil {
+				fmt.Printf("  ⚠️  Could not persist refreshed token: %v\n", saveErr)
+			}
+			token = newToken
+		}
+		h.Cfg.AccessToken = token.AccessToken
+		h.Cfg.AccountID = token.AccountID
+		h.mu.Unlock()
 	}
 
-	h.mu.Lock()
-	h.Cfg.AccessToken = token.AccessToken
-	h.Cfg.AccountID = token.AccountID
-	accessToken = token.AccessToken
-	accountID = token.AccountID
-	h.mu.Unlock()
-
-	return accessToken, accountID, nil
+	return token.AccessToken, token.AccountID, nil
 }
 
 // buildRequest creates the upstream HTTP request based on auth mode.
@@ -140,17 +158,7 @@ func (h *Handler) buildRequest(r *http.Request, oaiBody []byte) (*http.Request, 
 // sessionID returns the (lazily generated) per-process session id used
 // in upstream Codex requests.
 func (h *Handler) sessionID() string {
-	h.mu.RLock()
-	id := h.session
-	h.mu.RUnlock()
-	if id != "" {
-		return id
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.session == "" {
-		h.session = randomSessionID()
-	}
+	h.sessionOnce.Do(func() { h.session = randomSessionID() })
 	return h.session
 }
 
@@ -175,7 +183,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if os.Getenv("DEBUG") == "1" {
+	if debug {
 		incomingBody, _ := json.MarshalIndent(req, "", "  ")
 		fmt.Printf("\n--- [DEBUG] INCOMING ANTHROPIC REQUEST ---\n%s\n------------------------------------------\n", string(incomingBody))
 	}
@@ -200,12 +208,13 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if os.Getenv("DEBUG") == "1" {
+	if debug {
 		pretty, _ := json.MarshalIndent(oaiReq, "", "  ")
 		fmt.Printf("\n--- [DEBUG] OUTGOING REQUEST TO MODEL ---\n%s\n---------------------------------------\n", string(pretty))
 	}
 
 	const maxRetries = 3
+	const baseBackoff = 500 * time.Millisecond
 	var resp *http.Response
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		httpReq, err := h.buildRequest(r, oaiBody)
@@ -230,7 +239,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 		backoff := parseRetryAfter(resp.Header.Get("Retry-After"))
 		if backoff == 0 {
-			backoff = time.Duration(500<<uint(attempt)) * time.Millisecond // 500ms, 1s, 2s
+			backoff = baseBackoff << uint(attempt) // 500ms, 1s, 2s
 		}
 		fmt.Printf("  429 rate limited, retry %d/%d in %v\n", attempt+1, maxRetries, backoff)
 		_ = respBody // consumed and discarded
@@ -265,7 +274,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if os.Getenv("DEBUG") == "1" {
+	if debug {
 		fmt.Printf("\n--- [DEBUG] UPSTREAM RESPONSE ---\n%s\n----------------------------------\n", string(respBody))
 	}
 

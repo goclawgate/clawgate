@@ -111,7 +111,7 @@ clawgate maps Anthropic model names to OpenAI model names:
 
 The `anthropic/`, `openai/`, and `gemini/` prefixes are stripped before
 matching, so `anthropic/claude-3-5-sonnet` and `claude-3-5-sonnet` both
-map to the big model.
+route to the same model.
 
 Override the defaults:
 

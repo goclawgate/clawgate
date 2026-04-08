@@ -19,10 +19,8 @@ type AnthropicRequest struct {
 	Stream        bool                   `json:"stream,omitempty"`
 	Temperature   *float64               `json:"temperature,omitempty"`
 	TopP          *float64               `json:"top_p,omitempty"`
-	TopK          *int                   `json:"top_k,omitempty"`
 	Tools         []AnthropicTool        `json:"tools,omitempty"`
 	ToolChoice    map[string]interface{} `json:"tool_choice,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	Thinking      map[string]interface{} `json:"thinking,omitempty"`
 }
 
@@ -259,6 +257,20 @@ type AnthropicUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
+// maxCompletionTokens is the ceiling applied to the Anthropic max_tokens
+// field before forwarding upstream. OpenAI models generally cap at 16384
+// output tokens; higher values are silently clamped by upstream anyway.
+const maxCompletionTokens = 16384
+
+// Budget-to-effort thresholds for mapping Anthropic thinking.budget_tokens
+// to Codex reasoning effort levels.
+const (
+	budgetXHigh   = 32000
+	budgetHigh    = 10000
+	budgetMedium  = 4000
+	budgetLow     = 1000
+)
+
 // ── Translation functions ────────────────────────────────────────────
 
 // MapModel maps Anthropic model names to OpenAI model names.
@@ -350,13 +362,13 @@ func reasoningEffortFromThinking(thinking map[string]interface{}) string {
 	}
 	if budget, ok := thinking["budget_tokens"].(float64); ok {
 		switch {
-		case budget >= 32000:
+		case budget >= budgetXHigh:
 			return "xhigh"
-		case budget >= 10000:
+		case budget >= budgetHigh:
 			return "high"
-		case budget >= 4000:
+		case budget >= budgetMedium:
 			return "medium"
-		case budget >= 1000:
+		case budget >= budgetLow:
 			return "low"
 		case budget > 0:
 			return "minimal"
@@ -379,8 +391,8 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 	}
 
 	maxTokens := req.MaxTokens
-	if maxTokens > 16384 {
-		maxTokens = 16384
+	if maxTokens > maxCompletionTokens {
+		maxTokens = maxCompletionTokens
 	}
 
 	// ── ChatGPT Codex Format ─────────────────────────────────────
@@ -496,20 +508,7 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 		}
 
 		// Tools
-		if len(req.Tools) > 0 {
-			for i, t := range req.Tools {
-				name := t.Name
-				if name == "" {
-					name = fmt.Sprintf("unnamed_tool_%d", i)
-				}
-				codexReq.Tools = append(codexReq.Tools, CodexTool{
-					Type:        "function",
-					Name:        name,
-					Description: t.Description,
-					Parameters:  t.InputSchema,
-				})
-			}
-		}
+		codexReq.Tools = translateCodexTools(req.Tools)
 
 		if len(codexReq.Tools) > 0 {
 			t := true
@@ -517,23 +516,8 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 		}
 
 		// Tool choice
-		if req.ToolChoice != nil {
-			tc := req.ToolChoice
-			switch tc["type"] {
-			case "auto":
-				codexReq.ToolChoice = "auto"
-			case "any":
-				codexReq.ToolChoice = "required"
-			case "tool":
-				if name, ok := tc["name"].(string); ok {
-					codexReq.ToolChoice = map[string]interface{}{
-						"type": "function",
-						"name": name,
-					}
-				}
-			default:
-				codexReq.ToolChoice = "auto"
-			}
+		if choice := translateToolChoice(req.ToolChoice, true); choice != nil {
+			codexReq.ToolChoice = choice
 		}
 
 		if cfg.FastMode {
@@ -671,40 +655,10 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 		oaiReq.Stop = req.StopSequences
 	}
 
-	if len(req.Tools) > 0 {
-		for i, t := range req.Tools {
-			name := t.Name
-			if name == "" {
-				name = fmt.Sprintf("unnamed_tool_%d", i)
-			}
-			oaiReq.Tools = append(oaiReq.Tools, OpenAITool{
-				Type: "function",
-				Function: OpenAIFunction{
-					Name:        name,
-					Description: t.Description,
-					Parameters:  t.InputSchema,
-				},
-			})
-		}
-	}
+	oaiReq.Tools = translateOpenAITools(req.Tools)
 
-	if req.ToolChoice != nil {
-		tc := req.ToolChoice
-		switch tc["type"] {
-		case "auto":
-			oaiReq.ToolChoice = "auto"
-		case "any":
-			oaiReq.ToolChoice = "required"
-		case "tool":
-			if name, ok := tc["name"].(string); ok {
-				oaiReq.ToolChoice = map[string]interface{}{
-					"type":     "function",
-					"function": map[string]string{"name": name},
-				}
-			}
-		default:
-			oaiReq.ToolChoice = "auto"
-		}
+	if choice := translateToolChoice(req.ToolChoice, false); choice != nil {
+		oaiReq.ToolChoice = choice
 	}
 
 	return oaiReq, originalModel, mappedModel
@@ -862,6 +816,88 @@ func TranslateCodexResponse(resp *CodexResponse, originalModel string) *Anthropi
 		Content:    content,
 		StopReason: &stopReasonStr,
 		Usage:      usage,
+	}
+}
+
+// ── Shared tool / tool-choice translation helpers ────────────────────
+
+// translateCodexTools converts Anthropic tool definitions into Codex
+// Responses API tool definitions. Returns nil when the input is empty.
+func translateCodexTools(tools []AnthropicTool) []CodexTool {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]CodexTool, 0, len(tools))
+	for i, t := range tools {
+		name := t.Name
+		if name == "" {
+			name = fmt.Sprintf("unnamed_tool_%d", i)
+		}
+		out = append(out, CodexTool{
+			Type:        "function",
+			Name:        name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
+		})
+	}
+	return out
+}
+
+// translateOpenAITools converts Anthropic tool definitions into OpenAI
+// Chat Completions tool definitions. Returns nil when the input is empty.
+func translateOpenAITools(tools []AnthropicTool) []OpenAITool {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]OpenAITool, 0, len(tools))
+	for i, t := range tools {
+		name := t.Name
+		if name == "" {
+			name = fmt.Sprintf("unnamed_tool_%d", i)
+		}
+		out = append(out, OpenAITool{
+			Type: "function",
+			Function: OpenAIFunction{
+				Name:        name,
+				Description: t.Description,
+				Parameters:  t.InputSchema,
+			},
+		})
+	}
+	return out
+}
+
+// translateToolChoice maps an Anthropic tool_choice object to the
+// upstream representation. The shape of the "tool" case differs between
+// the Codex Responses API (flat name at top level) and Chat Completions
+// (nested under "function"), so isChatGPT selects the output form.
+// Returns nil when tc is nil (caller should leave field unset).
+func translateToolChoice(tc map[string]interface{}, isChatGPT bool) interface{} {
+	if tc == nil {
+		return nil
+	}
+	switch tc["type"] {
+	case "auto":
+		return "auto"
+	case "any":
+		return "required"
+	case "tool":
+		name, ok := tc["name"].(string)
+		if !ok || name == "" {
+			return "auto"
+		}
+		if isChatGPT {
+			return map[string]interface{}{
+				"type": "function",
+				"name": name,
+			}
+		}
+		return map[string]interface{}{
+			"type":     "function",
+			"function": map[string]string{"name": name},
+		}
+	default:
+		return "auto"
 	}
 }
 
