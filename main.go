@@ -61,8 +61,11 @@ func main() {
 		flagMode       = fs.String("mode", "", "Auth mode: chatgpt (default) or api")
 		flagAPIKey     = fs.String("apiKey", "", "OpenAI API key (required when --mode=api)")
 		flagBaseURL    = fs.String("baseUrl", "", "Custom OpenAI-compatible base URL (api mode only)")
-		flagBigModel   = fs.String("bigModel", "", "Model for sonnet/opus requests")
+		flagBigModel   = fs.String("bigModel", "", "Model for opus requests")
+		flagMidModel   = fs.String("midModel", "", "Model for sonnet requests")
 		flagSmallModel = fs.String("smallModel", "", "Model for haiku requests")
+		flagFast       = fs.Bool("fast", false, "Enable fast mode (service_tier: priority)")
+		flagReason     = fs.String("reason", "", "Reasoning effort: none|minimal|low|medium|high|xhigh (reasoning models only)")
 		flagPort       = fs.String("port", "", "Server port")
 		flagHelp       = fs.Bool("help", false, "Show help and exit")
 	)
@@ -83,17 +86,31 @@ func main() {
 	}
 
 	overrides := config.FlagOverrides{
-		AuthMode:      flagMode,
-		OpenAIAPIKey:  flagAPIKey,
-		OpenAIBaseURL: flagBaseURL,
-		BigModel:      flagBigModel,
-		SmallModel:    flagSmallModel,
-		Port:          flagPort,
+		AuthMode:        flagMode,
+		OpenAIAPIKey:    flagAPIKey,
+		OpenAIBaseURL:   flagBaseURL,
+		BigModel:        flagBigModel,
+		MidModel:        flagMidModel,
+		SmallModel:      flagSmallModel,
+		FastMode:        flagFast,
+		ReasoningEffort: flagReason,
+		Port:            flagPort,
 	}
 	cfg := config.Load(overrides)
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(1)
+	}
+
+	if warnings := cfg.CheckModels(); len(warnings) > 0 {
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "  WARNING: %s\n", w)
+		}
+	}
+	if warnings := cfg.CheckReasoning(); len(warnings) > 0 {
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "  WARNING: %s\n", w)
+		}
 	}
 
 	// In ChatGPT mode, verify token exists
@@ -125,7 +142,14 @@ func main() {
 	fmt.Printf("│  Mode:        %-37s│\n", mode)
 	fmt.Printf("│  Listening:   %-37s│\n", listen)
 	fmt.Printf("│  Big Model:   %-37s│\n", cfg.BigModel)
+	fmt.Printf("│  Mid Model:   %-37s│\n", cfg.MidModel)
 	fmt.Printf("│  Small Model: %-37s│\n", cfg.SmallModel)
+	if cfg.FastMode {
+		fmt.Printf("│  Fast Mode:   %-37s│\n", "enabled")
+	}
+	if cfg.ReasoningEffort != "" {
+		fmt.Printf("│  Reasoning:   %-37s│\n", cfg.ReasoningEffort)
+	}
 	fmt.Println("├────────────────────────────────────────────────────┤")
 	fmt.Println("│  Connect Claude Code with:                         │")
 	fmt.Printf("│    %-48s│\n", envLine+" \\")
@@ -172,8 +196,13 @@ Flags:
   --apiKey       OpenAI API key (required when --mode=api)
   --baseUrl      OpenAI-compatible base URL (api mode only,
                  default: https://api.openai.com/v1)
-  --bigModel     Model for sonnet/opus (default: gpt-5.4)
-  --smallModel   Model for haiku (default: gpt-5.4-mini)
+  --bigModel     Model for opus requests (default: gpt-5.4)
+  --midModel     Model for sonnet requests (default: gpt-5.3-codex)
+  --smallModel   Model for haiku requests (default: gpt-5.2-codex)
+  --fast         Enable fast mode (sends service_tier: priority)
+  --reason       Reasoning effort for reasoning models. One of:
+                 none, minimal, low, medium, high, xhigh.
+                 Per-request Anthropic 'thinking' field still wins.
   --port         Server port (default: 8082)
   --help, -h     Show this help
 
@@ -188,5 +217,7 @@ Examples:
   clawgate --mode=api --apiKey=sk-xxx --baseUrl=https://my.endpoint/v1 --port=9000
 
 Environment variables are honoured as a fallback (useful for CI/containers):
-  AUTH_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, BIG_MODEL, SMALL_MODEL, PORT`)
+  AUTH_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, BIG_MODEL, MID_MODEL, SMALL_MODEL,
+  FAST_MODE, REASON, PORT
+  (REASONING_EFFORT is also accepted as an alias for REASON.)`)
 }

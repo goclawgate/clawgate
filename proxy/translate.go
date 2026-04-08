@@ -61,6 +61,8 @@ type OpenAIRequest struct {
 	StreamOptions       *StreamOptions  `json:"stream_options,omitempty"`
 	Tools               []OpenAITool    `json:"tools,omitempty"`
 	ToolChoice          interface{}     `json:"tool_choice,omitempty"`
+	ServiceTier         string          `json:"service_tier,omitempty"`
+	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
 }
 
 type StreamOptions struct {
@@ -99,10 +101,11 @@ type CodexRequest struct {
 	ToolChoice       interface{}     `json:"tool_choice,omitempty"`
 	Reasoning        *CodexReasoning `json:"reasoning,omitempty"`
 	ParallelToolCall *bool           `json:"parallel_tool_calls,omitempty"`
+	ServiceTier      string          `json:"service_tier,omitempty"`
 }
 
 type CodexReasoning struct {
-	Effort  string `json:"effort,omitempty"`  // "low" | "medium" | "high"
+	Effort  string `json:"effort,omitempty"`  // "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
 	Summary string `json:"summary,omitempty"` // "auto" | "concise" | "detailed"
 }
 
@@ -269,7 +272,7 @@ func MapModel(model string, cfg *config.Config) string {
 		return cfg.SmallModel
 	}
 	if strings.Contains(lower, "sonnet") {
-		return cfg.BigModel
+		return cfg.MidModel
 	}
 	if strings.Contains(lower, "opus") {
 		return cfg.BigModel
@@ -293,6 +296,47 @@ func isReasoningModel(model string) bool {
 	return false
 }
 
+// effortRank returns a numeric rank for a reasoning effort string.
+// Higher rank = more reasoning. Unknown/empty returns -1.
+func effortRank(effort string) int {
+	switch effort {
+	case "none":
+		return 0
+	case "minimal":
+		return 1
+	case "low":
+		return 2
+	case "medium":
+		return 3
+	case "high":
+		return 4
+	case "xhigh":
+		return 5
+	default:
+		return -1
+	}
+}
+
+// resolveReasoningEffort returns the effort level to send, or "" to
+// leave the field unset. When both per-request thinking and the global
+// --reason flag are set, the higher of the two wins.
+func resolveReasoningEffort(cfg *config.Config, req *AnthropicRequest) string {
+	thinkingEffort := reasoningEffortFromThinking(req.Thinking)
+	flagEffort := cfg.ReasoningEffort
+
+	if thinkingEffort == "" {
+		return flagEffort
+	}
+	if flagEffort == "" {
+		return thinkingEffort
+	}
+	// Both set — return whichever ranks higher.
+	if effortRank(flagEffort) > effortRank(thinkingEffort) {
+		return flagEffort
+	}
+	return thinkingEffort
+}
+
 // reasoningEffortFromThinking maps Anthropic's `thinking` field
 // (extended thinking) to a Codex reasoning effort level. budget_tokens
 // is used as the heuristic when present.
@@ -306,12 +350,18 @@ func reasoningEffortFromThinking(thinking map[string]interface{}) string {
 	}
 	if budget, ok := thinking["budget_tokens"].(float64); ok {
 		switch {
-		case budget >= 16000:
+		case budget >= 32000:
+			return "xhigh"
+		case budget >= 10000:
 			return "high"
 		case budget >= 4000:
 			return "medium"
-		default:
+		case budget >= 1000:
 			return "low"
+		case budget > 0:
+			return "minimal"
+		default:
+			return "none"
 		}
 	}
 	// thinking enabled with no budget — default medium
@@ -349,7 +399,7 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 		if !reasoning {
 			codexReq.Temperature = req.Temperature
 			codexReq.TopP = req.TopP
-		} else if effort := reasoningEffortFromThinking(req.Thinking); effort != "" {
+		} else if effort := resolveReasoningEffort(cfg, req); effort != "" {
 			codexReq.Reasoning = &CodexReasoning{Effort: effort, Summary: "auto"}
 		}
 
@@ -486,6 +536,10 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 			}
 		}
 
+		if cfg.FastMode {
+			codexReq.ServiceTier = "priority"
+		}
+
 		return codexReq, originalModel, mappedModel
 	}
 
@@ -596,10 +650,17 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 		Stream:              req.Stream,
 	}
 	// Reasoning models reject temperature/top_p — only set them for
-	// non-reasoning models.
+	// non-reasoning models. Reasoning models, conversely, accept the
+	// `reasoning_effort` field, so forward whatever the user picked
+	// (higher of thinking / --reason flag via resolveReasoningEffort).
 	if !isReasoningModel(mappedModel) {
 		oaiReq.Temperature = req.Temperature
 		oaiReq.TopP = req.TopP
+	} else if effort := resolveReasoningEffort(cfg, req); effort != "" {
+		oaiReq.ReasoningEffort = effort
+	}
+	if cfg.FastMode {
+		oaiReq.ServiceTier = "priority"
 	}
 
 	if req.Stream {

@@ -4,8 +4,34 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
+
+// CodexModels lists the OpenAI models accepted by the ChatGPT Codex
+// backend at https://chatgpt.com/backend-api/codex/responses. Anything
+// outside this set is silently rejected upstream with an opaque error,
+// so we warn at startup. Update this list as new Codex models ship.
+var CodexModels = map[string]bool{
+	"gpt-5.1-codex-max":  true,
+	"gpt-5.1-codex-mini": true,
+	"gpt-5.2-codex":      true,
+	"gpt-5.3-codex":      true,
+	"gpt-5.4":            true,
+}
+
+// ReasoningEfforts is the canonical set of reasoning effort levels
+// accepted by the Codex / OpenAI reasoning models. Mirrors Codex CLI's
+// `model_reasoning_effort` vocabulary verbatim. Soft-checked at startup
+// so the catalog can grow without requiring a proxy release.
+var ReasoningEfforts = map[string]bool{
+	"none":    true,
+	"minimal": true,
+	"low":     true,
+	"medium":  true,
+	"high":    true,
+	"xhigh":   true,
+}
 
 // Config holds all proxy configuration.
 type Config struct {
@@ -18,7 +44,16 @@ type Config struct {
 
 	// Model mapping
 	BigModel   string
+	MidModel   string
 	SmallModel string
+
+	// Fast mode — sends service_tier: "priority" in API requests
+	FastMode bool
+
+	// Reasoning effort — one of none|minimal|low|medium|high|xhigh.
+	// Empty means "leave the field unset, let upstream use its default".
+	// Mirrors Codex CLI's model_reasoning_effort vocabulary.
+	ReasoningEffort string
 
 	// Server
 	Port string
@@ -31,25 +66,37 @@ type Config struct {
 // FlagOverrides carries values that were explicitly set on the command
 // line. Any non-nil pointer takes precedence over the env/.env layer.
 type FlagOverrides struct {
-	AuthMode      *string
-	OpenAIAPIKey  *string
-	OpenAIBaseURL *string
-	BigModel      *string
-	SmallModel    *string
-	Port          *string
+	AuthMode        *string
+	OpenAIAPIKey    *string
+	OpenAIBaseURL   *string
+	BigModel        *string
+	MidModel        *string
+	SmallModel      *string
+	FastMode        *bool
+	ReasoningEffort *string
+	Port            *string
 }
 
 // Load reads .env and environment variables, then layers CLI flag
 // overrides on top. Precedence: flag > env > .env > default.
 func Load(overrides FlagOverrides) *Config {
 	loadDotEnv(".env")
+	// REASON is the canonical env var; REASONING_EFFORT is accepted as a
+	// discoverability alias (mirrors how some users learn the feature).
+	reasonEnv := env("REASON", "")
+	if reasonEnv == "" {
+		reasonEnv = env("REASONING_EFFORT", "")
+	}
 	cfg := &Config{
-		AuthMode:      env("AUTH_MODE", "chatgpt"),
-		OpenAIAPIKey:  env("OPENAI_API_KEY", ""),
-		OpenAIBaseURL: env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-		BigModel:      env("BIG_MODEL", "gpt-5.4"),
-		SmallModel:    env("SMALL_MODEL", "gpt-5.4-mini"),
-		Port:          env("PORT", "8082"),
+		AuthMode:        env("AUTH_MODE", "chatgpt"),
+		OpenAIAPIKey:    env("OPENAI_API_KEY", ""),
+		OpenAIBaseURL:   env("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		BigModel:        env("BIG_MODEL", "gpt-5.4"),
+		MidModel:        env("MID_MODEL", "gpt-5.3-codex"),
+		SmallModel:      env("SMALL_MODEL", "gpt-5.2-codex"),
+		FastMode:        envBool("FAST_MODE"),
+		ReasoningEffort: reasonEnv,
+		Port:            env("PORT", "8082"),
 	}
 
 	// Layer flag overrides on top of env/defaults.
@@ -65,12 +112,25 @@ func Load(overrides FlagOverrides) *Config {
 	if overrides.BigModel != nil && *overrides.BigModel != "" {
 		cfg.BigModel = *overrides.BigModel
 	}
+	if overrides.MidModel != nil && *overrides.MidModel != "" {
+		cfg.MidModel = *overrides.MidModel
+	}
 	if overrides.SmallModel != nil && *overrides.SmallModel != "" {
 		cfg.SmallModel = *overrides.SmallModel
+	}
+	if overrides.FastMode != nil {
+		cfg.FastMode = *overrides.FastMode
+	}
+	if overrides.ReasoningEffort != nil && *overrides.ReasoningEffort != "" {
+		cfg.ReasoningEffort = *overrides.ReasoningEffort
 	}
 	if overrides.Port != nil && *overrides.Port != "" {
 		cfg.Port = *overrides.Port
 	}
+
+	// Normalise the reasoning effort: lowercased & trimmed so the
+	// allowlist check and wire payload always agree on the form.
+	cfg.ReasoningEffort = strings.ToLower(strings.TrimSpace(cfg.ReasoningEffort))
 
 	// Normalise auth mode: accept "api" as a friendly alias for the
 	// internal "apikey" value so all downstream checks keep working.
@@ -106,6 +166,75 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) IsChatGPT() bool { return c.AuthMode == "chatgpt" }
+
+// CheckModels returns human-readable warnings for any configured model
+// that the ChatGPT Codex backend will reject. It is a soft check — the
+// allowlist may be stale, so warnings are printed but never fatal.
+// Returns nil for API key mode (any model is fair game there).
+func (c *Config) CheckModels() []string {
+	if !c.IsChatGPT() {
+		return nil
+	}
+	var warnings []string
+	seen := map[string]bool{}
+	check := func(flag, model string) {
+		if model == "" || seen[model] || CodexModels[model] {
+			return
+		}
+		seen[model] = true
+		warnings = append(warnings, fmt.Sprintf(
+			"%s=%q is not a known Codex model. ChatGPT mode only accepts: %s. Use --mode=api with an OpenAI API key for other models.",
+			flag, model, codexModelList(),
+		))
+	}
+	check("--bigModel", c.BigModel)
+	check("--midModel", c.MidModel)
+	check("--smallModel", c.SmallModel)
+	return warnings
+}
+
+// CheckReasoning returns a single-element warning slice when the user
+// has set --reason / REASON to a value the proxy does not recognise.
+// The check applies in both auth modes (the value is forwarded
+// regardless). Returns nil when unset or valid.
+//
+// Soft-only: the upstream catalog can grow (e.g. a future "ultra")
+// without requiring a proxy release, so we never block startup.
+func (c *Config) CheckReasoning() []string {
+	if c.ReasoningEffort == "" {
+		return nil
+	}
+	if ReasoningEfforts[c.ReasoningEffort] {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"--reason=%q is not a known reasoning effort. Expected one of: %s. Forwarding anyway — upstream may reject it.",
+		c.ReasoningEffort, reasoningEffortList(),
+	)}
+}
+
+// reasoningEffortList returns the known efforts as a comma-separated
+// string in canonical (low → high) order rather than alphabetical.
+func reasoningEffortList() string {
+	// Stable, intuitive order — not alphabetical.
+	return "none, minimal, low, medium, high, xhigh"
+}
+
+// codexModelList returns the known Codex models as a sorted,
+// comma-separated string suitable for embedding in user messages.
+func codexModelList() string {
+	models := make([]string, 0, len(CodexModels))
+	for m := range CodexModels {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+	return strings.Join(models, ", ")
+}
+
+func envBool(key string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	return v == "1" || v == "true" || v == "yes"
+}
 
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {

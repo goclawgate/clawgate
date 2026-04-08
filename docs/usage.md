@@ -50,8 +50,11 @@ All flags are optional. Flags take precedence over environment variables.
 | `--mode` | `chatgpt` | Auth mode: `chatgpt` or `api` |
 | `--apiKey` | -- | OpenAI API key (required when `--mode=api`) |
 | `--baseUrl` | `https://api.openai.com/v1` | OpenAI-compatible base URL (api mode only) |
-| `--bigModel` | `gpt-5.4` | Model for sonnet/opus requests |
-| `--smallModel` | `gpt-5.4-mini` | Model for haiku requests |
+| `--bigModel` | `gpt-5.4` | Model for opus requests |
+| `--midModel` | `gpt-5.3-codex` | Model for sonnet requests |
+| `--smallModel` | `gpt-5.2-codex` | Model for haiku requests |
+| `--fast` | off | Enable fast mode (sends `service_tier: priority`) |
+| `--reason` | -- | Reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (reasoning models only) |
 | `--port` | `8082` | Server port |
 | `--help` | -- | Show help and exit |
 
@@ -78,7 +81,10 @@ for CI/CD, Docker, and other automated setups.
 | `OPENAI_API_KEY` | `--apiKey` |
 | `OPENAI_BASE_URL` | `--baseUrl` |
 | `BIG_MODEL` | `--bigModel` |
+| `MID_MODEL` | `--midModel` |
 | `SMALL_MODEL` | `--smallModel` |
+| `FAST_MODE` | `--fast` |
+| `REASON` | `--reason` (alias: `REASONING_EFFORT`) |
 | `PORT` | `--port` |
 | `DEBUG` | -- (set to `1` to enable debug logging) |
 
@@ -98,8 +104,9 @@ clawgate maps Anthropic model names to OpenAI model names:
 
 | Claude Code sends | clawgate routes to |
 |---|---|
-| Any model containing `haiku` | `--smallModel` (default: `gpt-5.4-mini`) |
-| Any model containing `sonnet` or `opus` | `--bigModel` (default: `gpt-5.4`) |
+| Any model containing `haiku` | `--smallModel` (default: `gpt-5.2-codex`) |
+| Any model containing `sonnet` | `--midModel` (default: `gpt-5.3-codex`) |
+| Any model containing `opus` | `--bigModel` (default: `gpt-5.4`) |
 | Any other model | `--bigModel` |
 
 The `anthropic/`, `openai/`, and `gemini/` prefixes are stripped before
@@ -108,9 +115,61 @@ map to the big model.
 
 Override the defaults:
 
+**ChatGPT mode** — the Codex backend only accepts a fixed set of models:
+`gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5.2-codex`, `gpt-5.3-codex`,
+`gpt-5.4`. clawgate prints a warning at startup if you pick anything else.
+
 ```bash
-clawgate --bigModel=gpt-4o --smallModel=gpt-4o-mini
+clawgate --bigModel=gpt-5.4 --midModel=gpt-5.3-codex --smallModel=gpt-5.2-codex
 ```
+
+**API key mode** — any model your endpoint supports works:
+
+```bash
+clawgate --mode=api --apiKey=sk-xxx --bigModel=gpt-4o --midModel=gpt-4o --smallModel=gpt-4o-mini
+```
+
+### Reasoning effort
+
+GPT-5 and o-series models accept a `reasoning_effort` knob that trades
+quality for cost/latency. clawgate exposes it as `--reason` (env
+`REASON`), using Codex CLI's exact vocabulary so values transfer
+verbatim:
+
+| Value | Meaning |
+|---|---|
+| `none` | Skip the reasoning step entirely |
+| `minimal` | Smallest amount of reasoning |
+| `low` | Light reasoning |
+| `medium` | Default for most reasoning models |
+| `high` | More thorough reasoning |
+| `xhigh` | Maximum reasoning (currently only meaningful for `gpt-5.1-codex-max`) |
+
+```bash
+clawgate --reason=high
+clawgate --mode=api --apiKey=sk-xxx --reason=minimal
+```
+
+**Precedence:** if both `--reason` and per-request `thinking`
+(`budget_tokens`) are set, whichever maps to the **higher** effort wins.
+If only one is set, that value applies. If neither is set, the proxy
+leaves the field unset and upstream uses its model default (typically
+`medium`).
+
+The budget-to-effort mapping used for per-request `thinking`:
+
+| Budget range | Effort |
+|---|---|
+| >= 32000 | `xhigh` |
+| >= 10000 | `high` |
+| >= 4000  | `medium` |
+| >= 1000  | `low` |
+| > 0      | `minimal` |
+| <= 0     | `none` |
+
+The flag is silently ignored for non-reasoning models such as `gpt-4o`
+or `gpt-4`. Unknown values trigger a startup warning but are still
+forwarded — the upstream catalog may grow without a proxy release.
 
 ## Connecting Claude Code
 

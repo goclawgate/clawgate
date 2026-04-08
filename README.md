@@ -97,8 +97,11 @@ CI/containers). Precedence: **flag > env > .env > default**.
 | `--mode` | `AUTH_MODE` | `chatgpt` | `chatgpt` (OAuth) or `api` (OpenAI API key) |
 | `--apiKey` | `OPENAI_API_KEY` | — | Required when `--mode=api` |
 | `--baseUrl` | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Custom endpoint for `api` mode |
-| `--bigModel` | `BIG_MODEL` | `gpt-5.4` | Model for sonnet/opus requests |
-| `--smallModel` | `SMALL_MODEL` | `gpt-5.4-mini` | Model for haiku requests |
+| `--bigModel` | `BIG_MODEL` | `gpt-5.4` | Model for opus requests |
+| `--midModel` | `MID_MODEL` | `gpt-5.3-codex` | Model for sonnet requests |
+| `--smallModel` | `SMALL_MODEL` | `gpt-5.2-codex` | Model for haiku requests |
+| `--fast` | `FAST_MODE` | off | Send `service_tier: priority` in API requests |
+| `--reason` | `REASON` | — | Reasoning effort for reasoning models: `none\|minimal\|low\|medium\|high\|xhigh` |
 | `--port` | `PORT` | `8082` | Server port |
 
 Environment-variable form still works unchanged:
@@ -111,8 +114,9 @@ AUTH_MODE=apikey OPENAI_API_KEY=sk-... ./clawgate
 
 | Claude Code sends | Proxy routes to |
 |---|---|
-| `*haiku*` | `SMALL_MODEL` (default: gpt-5.4-mini) |
-| `*sonnet*` / `*opus*` | `BIG_MODEL` (default: gpt-5.4) |
+| `*haiku*` | `SMALL_MODEL` (default: gpt-5.2-codex) |
+| `*sonnet*` | `MID_MODEL` (default: gpt-5.3-codex) |
+| `*opus*` | `BIG_MODEL` (default: gpt-5.4) |
 
 ## Build from Source
 

@@ -17,17 +17,18 @@ func newCfg(chatgpt bool) *config.Config {
 	return &config.Config{
 		AuthMode:   mode,
 		BigModel:   "gpt-5.4",
-		SmallModel: "gpt-5.4-mini",
+		MidModel:   "gpt-5.3-codex",
+		SmallModel: "gpt-5.2-codex",
 	}
 }
 
 func TestMapModelDispatch(t *testing.T) {
 	cfg := newCfg(true)
 	cases := map[string]string{
-		"claude-3-5-sonnet-latest": "gpt-5.4",
-		"claude-haiku-4-5":         "gpt-5.4-mini",
+		"claude-3-5-sonnet-latest": "gpt-5.3-codex",
+		"claude-haiku-4-5":         "gpt-5.2-codex",
 		"claude-opus-4-6":          "gpt-5.4",
-		"anthropic/claude-3-haiku": "gpt-5.4-mini",
+		"anthropic/claude-3-haiku": "gpt-5.2-codex",
 		"some-unknown-model":       "gpt-5.4",
 	}
 	for in, want := range cases {
@@ -38,7 +39,7 @@ func TestMapModelDispatch(t *testing.T) {
 }
 
 func TestIsReasoningModel(t *testing.T) {
-	for _, m := range []string{"o1-preview", "o3-mini", "o4", "gpt-5.4", "gpt-5.4-mini", "gpt-5.1-codex"} {
+	for _, m := range []string{"o1-preview", "o3-mini", "o4", "gpt-5.4", "gpt-5.2-codex", "gpt-5.1-codex"} {
 		if !isReasoningModel(m) {
 			t.Errorf("isReasoningModel(%q) = false, want true", m)
 		}
@@ -51,21 +52,33 @@ func TestIsReasoningModel(t *testing.T) {
 }
 
 func TestReasoningEffortFromThinking(t *testing.T) {
-	cases := []struct {
+	tests := []struct {
+		name string
 		in   map[string]interface{}
 		want string
 	}{
-		{nil, ""},
-		{map[string]interface{}{"type": "disabled"}, ""},
-		{map[string]interface{}{"type": "enabled"}, "medium"},
-		{map[string]interface{}{"type": "enabled", "budget_tokens": float64(1000)}, "low"},
-		{map[string]interface{}{"type": "enabled", "budget_tokens": float64(8000)}, "medium"},
-		{map[string]interface{}{"type": "enabled", "budget_tokens": float64(32000)}, "high"},
+		{"nil", nil, ""},
+		{"disabled", map[string]interface{}{"type": "disabled"}, ""},
+		{"enabled no budget", map[string]interface{}{"type": "enabled"}, "medium"},
+		{"xhigh: budget=128000", map[string]interface{}{"type": "enabled", "budget_tokens": float64(128000)}, "xhigh"},
+		{"xhigh: budget=32000 (boundary)", map[string]interface{}{"type": "enabled", "budget_tokens": float64(32000)}, "xhigh"},
+		{"high: budget=20000", map[string]interface{}{"type": "enabled", "budget_tokens": float64(20000)}, "high"},
+		{"high: budget=10000 (boundary)", map[string]interface{}{"type": "enabled", "budget_tokens": float64(10000)}, "high"},
+		{"medium: budget=8000", map[string]interface{}{"type": "enabled", "budget_tokens": float64(8000)}, "medium"},
+		{"medium: budget=4000 (boundary)", map[string]interface{}{"type": "enabled", "budget_tokens": float64(4000)}, "medium"},
+		{"low: budget=2000", map[string]interface{}{"type": "enabled", "budget_tokens": float64(2000)}, "low"},
+		{"low: budget=1000 (boundary)", map[string]interface{}{"type": "enabled", "budget_tokens": float64(1000)}, "low"},
+		{"minimal: budget=500", map[string]interface{}{"type": "enabled", "budget_tokens": float64(500)}, "minimal"},
+		{"minimal: budget=1", map[string]interface{}{"type": "enabled", "budget_tokens": float64(1)}, "minimal"},
+		{"none: budget=0", map[string]interface{}{"type": "enabled", "budget_tokens": float64(0)}, "none"},
+		{"none: budget=-1", map[string]interface{}{"type": "enabled", "budget_tokens": float64(-1)}, "none"},
 	}
-	for _, c := range cases {
-		if got := reasoningEffortFromThinking(c.in); got != c.want {
-			t.Errorf("reasoningEffortFromThinking(%v) = %q, want %q", c.in, got, c.want)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reasoningEffortFromThinking(tt.in); got != tt.want {
+				t.Errorf("reasoningEffortFromThinking(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -209,6 +222,158 @@ func TestTranslateRequestCodexToolRoundtrip(t *testing.T) {
 	}
 	if out2.CallID != "call_1" {
 		t.Errorf("expected call_id call_1, got %q", out2.CallID)
+	}
+}
+
+func TestResolveReasoningEffort_FlagOnly(t *testing.T) {
+	cfg := newCfg(true)
+	cfg.ReasoningEffort = "high"
+	req := &AnthropicRequest{}
+	if got := resolveReasoningEffort(cfg, req); got != "high" {
+		t.Errorf("expected high, got %q", got)
+	}
+}
+
+func TestResolveReasoningEffort_ThinkingHigherThanFlag(t *testing.T) {
+	cfg := newCfg(true)
+	cfg.ReasoningEffort = "low"
+	req := &AnthropicRequest{
+		Thinking: map[string]interface{}{"type": "enabled", "budget_tokens": float64(32000)},
+	}
+	if got := resolveReasoningEffort(cfg, req); got != "xhigh" {
+		t.Errorf("expected thinking to win with xhigh, got %q", got)
+	}
+}
+
+func TestResolveReasoningEffort_FlagHigherThanThinking(t *testing.T) {
+	cfg := newCfg(true)
+	cfg.ReasoningEffort = "xhigh"
+	req := &AnthropicRequest{
+		Thinking: map[string]interface{}{"type": "enabled", "budget_tokens": float64(10000)},
+	}
+	if got := resolveReasoningEffort(cfg, req); got != "xhigh" {
+		t.Errorf("expected flag to win with xhigh, got %q", got)
+	}
+}
+
+func TestResolveReasoningEffort_BothEqual(t *testing.T) {
+	cfg := newCfg(true)
+	cfg.ReasoningEffort = "high"
+	req := &AnthropicRequest{
+		Thinking: map[string]interface{}{"type": "enabled", "budget_tokens": float64(15000)},
+	}
+	if got := resolveReasoningEffort(cfg, req); got != "high" {
+		t.Errorf("expected high, got %q", got)
+	}
+}
+
+func TestEffortRank(t *testing.T) {
+	tests := []struct {
+		effort string
+		rank   int
+	}{
+		{"none", 0},
+		{"minimal", 1},
+		{"low", 2},
+		{"medium", 3},
+		{"high", 4},
+		{"xhigh", 5},
+		{"", -1},
+		{"unknown", -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.effort, func(t *testing.T) {
+			if got := effortRank(tt.effort); got != tt.rank {
+				t.Errorf("effortRank(%q) = %d, want %d", tt.effort, got, tt.rank)
+			}
+		})
+	}
+}
+
+func TestResolveReasoningEffort_NeitherSet(t *testing.T) {
+	cfg := newCfg(true)
+	req := &AnthropicRequest{}
+	if got := resolveReasoningEffort(cfg, req); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestTranslateRequestCodex_ReasoningFlagApplied(t *testing.T) {
+	cfg := newCfg(true)
+	cfg.ReasoningEffort = "xhigh"
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hi"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	codex, ok := out.(*CodexRequest)
+	if !ok {
+		t.Fatalf("expected *CodexRequest, got %T", out)
+	}
+	if codex.Reasoning == nil {
+		t.Fatal("expected codex.Reasoning to be set")
+	}
+	if codex.Reasoning.Effort != "xhigh" {
+		t.Errorf("expected effort=xhigh, got %q", codex.Reasoning.Effort)
+	}
+	if codex.Reasoning.Summary != "auto" {
+		t.Errorf("expected summary=auto, got %q", codex.Reasoning.Summary)
+	}
+}
+
+func TestTranslateRequestCodex_ReasoningFlagIgnoredForNonReasoningModel(t *testing.T) {
+	cfg := newCfg(false) // api key mode
+	cfg.BigModel = "gpt-4o"
+	cfg.ReasoningEffort = "high"
+	req := &AnthropicRequest{
+		Model:     "claude-opus-4-6",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hi"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	oai, ok := out.(*OpenAIRequest)
+	if !ok {
+		t.Fatalf("expected *OpenAIRequest, got %T", out)
+	}
+	if oai.ReasoningEffort != "" {
+		t.Errorf("expected empty ReasoningEffort for non-reasoning model gpt-4o, got %q", oai.ReasoningEffort)
+	}
+}
+
+func TestTranslateRequestOpenAI_ReasoningFlagApplied(t *testing.T) {
+	cfg := newCfg(false) // api key mode
+	cfg.BigModel = "gpt-5.4"
+	cfg.ReasoningEffort = "medium"
+	temp := 0.7
+	topP := 0.9
+	req := &AnthropicRequest{
+		Model:       "claude-opus-4-6",
+		MaxTokens:   1024,
+		Temperature: &temp,
+		TopP:        &topP,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hi"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	oai, ok := out.(*OpenAIRequest)
+	if !ok {
+		t.Fatalf("expected *OpenAIRequest, got %T", out)
+	}
+	if oai.ReasoningEffort != "medium" {
+		t.Errorf("expected ReasoningEffort=medium, got %q", oai.ReasoningEffort)
+	}
+	// Reasoning models still drop temperature/top_p.
+	if oai.Temperature != nil {
+		t.Errorf("temperature should be nil for reasoning model, got %v", *oai.Temperature)
+	}
+	if oai.TopP != nil {
+		t.Errorf("top_p should be nil for reasoning model, got %v", *oai.TopP)
 	}
 }
 
@@ -449,5 +614,81 @@ func TestOpenAIImageContentParts(t *testing.T) {
 	}
 	if !found {
 		t.Error("did not find user message with image content parts")
+	}
+}
+
+func TestMapModelMidTier(t *testing.T) {
+	cfg := newCfg(true)
+	// Sonnet should map to MidModel, not BigModel
+	if got := MapModel("claude-sonnet-4-6", cfg); got != "gpt-5.3-codex" {
+		t.Errorf("MapModel(sonnet) = %q, want gpt-5.3-codex", got)
+	}
+	// Opus should map to BigModel
+	if got := MapModel("claude-opus-4-6", cfg); got != "gpt-5.4" {
+		t.Errorf("MapModel(opus) = %q, want gpt-5.4", got)
+	}
+	// Haiku should map to SmallModel
+	if got := MapModel("claude-haiku-4-5", cfg); got != "gpt-5.2-codex" {
+		t.Errorf("MapModel(haiku) = %q, want gpt-5.2-codex", got)
+	}
+}
+
+func TestTranslateRequestCodexFastMode(t *testing.T) {
+	cfg := newCfg(true)
+	cfg.FastMode = true
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	codex, ok := out.(*CodexRequest)
+	if !ok {
+		t.Fatalf("expected *CodexRequest, got %T", out)
+	}
+	if codex.ServiceTier != "priority" {
+		t.Errorf("expected service_tier=priority, got %q", codex.ServiceTier)
+	}
+}
+
+func TestTranslateRequestCodexNoFastMode(t *testing.T) {
+	cfg := newCfg(true)
+	// FastMode defaults to false
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	codex, ok := out.(*CodexRequest)
+	if !ok {
+		t.Fatalf("expected *CodexRequest, got %T", out)
+	}
+	if codex.ServiceTier != "" {
+		t.Errorf("expected empty service_tier, got %q", codex.ServiceTier)
+	}
+}
+
+func TestTranslateRequestOpenAIFastMode(t *testing.T) {
+	cfg := newCfg(false)
+	cfg.FastMode = true
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	oai, ok := out.(*OpenAIRequest)
+	if !ok {
+		t.Fatalf("expected *OpenAIRequest, got %T", out)
+	}
+	if oai.ServiceTier != "priority" {
+		t.Errorf("expected service_tier=priority, got %q", oai.ServiceTier)
 	}
 }
