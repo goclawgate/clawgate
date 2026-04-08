@@ -95,6 +95,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 		cachedTokens        int
 		hasSentStop         bool
 		reasoningBlockOpen  bool           // tracks whether a reasoning block is currently open
+		reasoningBlockIdx   int            // Anthropic block index for the current reasoning block
 		toolIndexMap        map[int]int    // OpenAI tool index → Anthropic block index
 		codexItemToBlockIdx map[string]int // Codex item_id → Anthropic block index (parallel tool calls)
 		lastCodexBlockIdx   int            // most recently opened Codex tool block (fallback routing)
@@ -237,12 +238,16 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 				deltaStr, _ := cChunk["delta"].(string)
 				if deltaStr != "" {
 					if !reasoningBlockOpen {
-						// Open a new thinking block on the first delta only
+						// Open a new thinking block on the first delta only.
+						// Track its index separately so that tool blocks
+						// opened between reasoning deltas don't cause the
+						// done event to stop the wrong block.
 						reasoningBlockOpen = true
 						lastAnthropicIdx++
+						reasoningBlockIdx = lastAnthropicIdx
 						writeSSE(w, flusher, "content_block_start", map[string]interface{}{
 							"type":  "content_block_start",
-							"index": lastAnthropicIdx,
+							"index": reasoningBlockIdx,
 							"content_block": map[string]interface{}{
 								"type":     "thinking",
 								"thinking": "",
@@ -251,7 +256,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 					}
 					writeSSE(w, flusher, "content_block_delta", map[string]interface{}{
 						"type":  "content_block_delta",
-						"index": lastAnthropicIdx,
+						"index": reasoningBlockIdx,
 						"delta": map[string]interface{}{"type": "thinking_delta", "thinking": deltaStr},
 					})
 				}
@@ -262,9 +267,9 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 					if stoppedBlocks == nil {
 						stoppedBlocks = map[int]bool{}
 					}
-					stoppedBlocks[lastAnthropicIdx] = true
+					stoppedBlocks[reasoningBlockIdx] = true
 					writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
-						"type": "content_block_stop", "index": lastAnthropicIdx,
+						"type": "content_block_stop", "index": reasoningBlockIdx,
 					})
 				}
 
@@ -272,7 +277,8 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 				if !hasSentStop {
 					hasSentStop = true
 
-					if respData, ok := cChunk["response"].(map[string]interface{}); ok && respData != nil {
+					respData, _ := cChunk["response"].(map[string]interface{})
+					if respData != nil {
 						if usage, ok := respData["usage"].(map[string]interface{}); ok {
 							if v, ok2 := usage["output_tokens"].(float64); ok2 {
 								outputTokens = int(v)
@@ -290,7 +296,20 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 
 					reason := "end_turn"
 					if cType == "response.incomplete" {
-						reason = "max_tokens"
+						// Mirror TranslateCodexResponse: parse the actual
+						// incomplete reason instead of hard-coding max_tokens.
+						incReason := ""
+						if respData != nil {
+							if det, ok := respData["incomplete_details"].(map[string]interface{}); ok {
+								incReason, _ = det["reason"].(string)
+							}
+						}
+						switch incReason {
+						case "max_output_tokens", "max_tokens":
+							reason = "max_tokens"
+						default:
+							reason = "end_turn"
+						}
 					} else if toolBlockCount > 0 {
 						reason = "tool_use"
 					}
@@ -433,14 +452,8 @@ func finalizeStream(w http.ResponseWriter, f http.Flusher, textBlockClosed bool,
 	usage := map[string]interface{}{
 		"output_tokens": outputTokens,
 	}
-	// Subtract cached tokens from input_tokens to mirror Anthropic's
-	// "fresh" input bookkeeping; Codex returns the inclusive total.
 	if inputTokens > 0 {
-		fresh := inputTokens
-		if cachedTokens > 0 && fresh >= cachedTokens {
-			fresh -= cachedTokens
-		}
-		usage["input_tokens"] = fresh
+		usage["input_tokens"] = normalizeCachedInputTokens(inputTokens, cachedTokens)
 	}
 	if cachedTokens > 0 {
 		usage["cache_read_input_tokens"] = cachedTokens

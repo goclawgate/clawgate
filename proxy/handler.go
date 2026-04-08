@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -76,7 +77,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 // don't all call auth.Refresh — only the first goroutine to acquire the
 // write lock actually talks to the OAuth server; the rest observe the
 // freshly refreshed token on re-check and return immediately.
-func (h *Handler) getToken() (string, string, error) {
+func (h *Handler) getToken(ctx context.Context) (string, string, error) {
 	if !h.Cfg.IsChatGPT() {
 		return h.Cfg.OpenAIAPIKey, "", nil
 	}
@@ -86,7 +87,7 @@ func (h *Handler) getToken() (string, string, error) {
 	token, err := auth.LoadToken()
 	h.mu.RUnlock()
 	if err != nil {
-		return "", "", fmt.Errorf("no saved token — run './clawgate login' first")
+		return "", "", fmt.Errorf("no saved token — run 'clawgate login' first")
 	}
 
 	if token.IsExpired() {
@@ -97,11 +98,11 @@ func (h *Handler) getToken() (string, string, error) {
 		token, err = auth.LoadToken()
 		if err != nil {
 			h.mu.Unlock()
-			return "", "", fmt.Errorf("no saved token — run './clawgate login' first")
+			return "", "", fmt.Errorf("no saved token — run 'clawgate login' first")
 		}
 		if token.IsExpired() {
 			fmt.Println("🔄 Refreshing access token...")
-			newToken, refreshErr := auth.Refresh(token)
+			newToken, refreshErr := auth.Refresh(ctx, token)
 			if refreshErr != nil {
 				h.mu.Unlock()
 				return "", "", fmt.Errorf("token refresh failed: %w", refreshErr)
@@ -121,7 +122,7 @@ func (h *Handler) getToken() (string, string, error) {
 
 // buildRequest creates the upstream HTTP request based on auth mode.
 func (h *Handler) buildRequest(r *http.Request, oaiBody []byte) (*http.Request, error) {
-	accessToken, accountID, err := h.getToken()
+	accessToken, accountID, err := h.getToken(r.Context())
 	if err != nil {
 		return nil, err
 	}

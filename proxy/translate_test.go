@@ -673,6 +673,35 @@ func TestTranslateRequestCodexNoFastMode(t *testing.T) {
 	}
 }
 
+// TestTranslateRequestCodexDoesNotForwardMaxTokens verifies that the
+// Codex path never includes max_output_tokens in the serialized request.
+// The ChatGPT backend-api/codex/responses endpoint rejects the field —
+// matching the official Codex CLI and OpenCode's codex plugin (which
+// strips it with "Match codex cli"). Marshalling to JSON catches both
+// the field being present with a non-zero value and an omitempty zero.
+func TestTranslateRequestCodexDoesNotForwardMaxTokens(t *testing.T) {
+	cfg := newCfg(true)
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	codex, ok := out.(*CodexRequest)
+	if !ok {
+		t.Fatalf("expected *CodexRequest, got %T", out)
+	}
+	body, err := json.Marshal(codex)
+	if err != nil {
+		t.Fatalf("failed to marshal CodexRequest: %v", err)
+	}
+	if strings.Contains(string(body), "max_output_tokens") {
+		t.Errorf("serialized CodexRequest must NOT contain max_output_tokens, got: %s", string(body))
+	}
+}
+
 func TestTranslateRequestOpenAIFastMode(t *testing.T) {
 	cfg := newCfg(false)
 	cfg.FastMode = true

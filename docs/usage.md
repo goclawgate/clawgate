@@ -254,11 +254,11 @@ Pass `--apiKey=sk-...` when using `--mode=api`, or set the
 
 **macOS "unidentified developer" dialog**
 Run `xattr -d com.apple.quarantine clawgate` before first use. See
-the [macOS install guide](install-macos.md) for details.
+the [macOS install guide](install-macos.html) for details.
 
 **Windows SmartScreen warning**
 Click "More info" then "Run anyway". See the
-[Windows install guide](install-windows.md) for details.
+[Windows install guide](install-windows.html) for details.
 
 **429 / rate limit errors**
 clawgate retries rate-limited requests automatically (up to 3 times

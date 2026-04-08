@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 // TestRefreshPreservesRefreshTokenWhenOmitted verifies that when the
@@ -33,7 +36,7 @@ func TestRefreshPreservesRefreshTokenWhenOmitted(t *testing.T) {
 		ExpiresAt:    0,
 	}
 
-	tok, err := Refresh(prev)
+	tok, err := Refresh(context.Background(), prev)
 	if err != nil {
 		t.Fatalf("Refresh returned error: %v", err)
 	}
@@ -66,7 +69,7 @@ func TestRefreshUsesNewRefreshTokenWhenProvided(t *testing.T) {
 		RefreshToken: "old-refresh",
 		AccountID:    "acct_123",
 	}
-	tok, err := Refresh(prev)
+	tok, err := Refresh(context.Background(), prev)
 	if err != nil {
 		t.Fatalf("Refresh returned error: %v", err)
 	}
@@ -78,10 +81,60 @@ func TestRefreshUsesNewRefreshTokenWhenProvided(t *testing.T) {
 // TestRefreshNilPrev guards against nil dereference when the caller
 // hasn't loaded a token.
 func TestRefreshNilPrev(t *testing.T) {
-	if _, err := Refresh(nil); err == nil {
+	if _, err := Refresh(context.Background(), nil); err == nil {
 		t.Error("expected error for nil prev token")
 	}
-	if _, err := Refresh(&Token{RefreshToken: ""}); err == nil {
+	if _, err := Refresh(context.Background(), &Token{RefreshToken: ""}); err == nil {
 		t.Error("expected error for empty refresh token")
+	}
+}
+
+// TestRefreshHonorsContextCancellation verifies that a cancelled context
+// aborts the refresh HTTP call promptly rather than blocking for the
+// full authClient.Timeout (30s).
+func TestRefreshHonorsContextCancellation(t *testing.T) {
+	// Server that takes much longer than the client's context timeout.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+	}))
+	defer srv.Close()
+
+	origIssuer := Issuer
+	Issuer = srv.URL
+	defer func() { Issuer = origIssuer }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	prev := &Token{RefreshToken: "tok"}
+	_, err := Refresh(ctx, prev)
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if !strings.Contains(err.Error(), "context") {
+		t.Errorf("expected context-related error, got: %v", err)
+	}
+}
+
+// TestRefreshNon200Error verifies that a non-200 response from the
+// OAuth server is surfaced as an error containing the status code.
+func TestRefreshNon200Error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer srv.Close()
+
+	origIssuer := Issuer
+	Issuer = srv.URL
+	defer func() { Issuer = origIssuer }()
+
+	prev := &Token{RefreshToken: "tok"}
+	_, err := Refresh(context.Background(), prev)
+	if err == nil {
+		t.Fatal("expected error for 401 response")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected error to contain '401', got: %v", err)
 	}
 }

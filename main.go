@@ -27,7 +27,7 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Printf("\n  Login complete. Account ID: %s\n", token.AccountID)
-			fmt.Println("  Run './clawgate' to start the proxy.")
+			fmt.Println("  Run 'clawgate' to start the proxy.")
 			fmt.Println()
 			return
 		case "logout":
@@ -36,7 +36,7 @@ func main() {
 		case "status":
 			token, err := auth.LoadToken()
 			if err != nil {
-				fmt.Println("❌ Not logged in. Run './clawgate login'")
+				fmt.Println("❌ Not logged in. Run 'clawgate login'")
 				os.Exit(1)
 			}
 			fmt.Println("✅ Logged in")
@@ -86,6 +86,17 @@ func main() {
 		return
 	}
 
+	// Only override FastMode when --fast was explicitly passed on the
+	// command line. fs.Bool always returns a non-nil pointer (defaulting
+	// to false), so passing it unconditionally would clobber the env/.env
+	// FAST_MODE=1 setting every time clawgate is started without --fast.
+	var fastOverride *bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "fast" {
+			fastOverride = flagFast
+		}
+	})
+
 	overrides := config.FlagOverrides{
 		AuthMode:        flagMode,
 		OpenAIAPIKey:    flagAPIKey,
@@ -93,7 +104,7 @@ func main() {
 		BigModel:        flagBigModel,
 		MidModel:        flagMidModel,
 		SmallModel:      flagSmallModel,
-		FastMode:        flagFast,
+		FastMode:        fastOverride,
 		ReasoningEffort: flagReason,
 		Host:            flagHost,
 		Port:            flagPort,
@@ -119,7 +130,7 @@ func main() {
 	if cfg.IsChatGPT() {
 		token, err := auth.LoadToken()
 		if err != nil {
-			fmt.Println("❌ Not logged in. Run './clawgate login' first.")
+			fmt.Println("❌ Not logged in. Run 'clawgate login' first.")
 			os.Exit(1)
 		}
 		cfg.AccessToken = token.AccessToken
@@ -136,7 +147,7 @@ func main() {
 		mode = "ChatGPT Codex (OAuth)"
 	}
 
-	listen := "http://" + cfg.Host + ":" + cfg.Port
+	listen := "http://" + displayHost(cfg.Host) + ":" + cfg.Port
 	envLine := "ANTHROPIC_BASE_URL=" + listen
 	fmt.Println("┌────────────────────────────────────────────────────┐")
 	fmt.Println("│        clawgate — Anthropic ↔ OpenAI Proxy         │")
@@ -178,6 +189,17 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Shutdown error: %v\n", err)
 	}
+}
+
+// displayHost returns the host string to show in the connection hint.
+// When the server binds to all interfaces (0.0.0.0, ::, or empty),
+// users should connect via localhost, not the wildcard address.
+func displayHost(host string) string {
+	switch host {
+	case "0.0.0.0", "::", "":
+		return "localhost"
+	}
+	return host
 }
 
 func printHelp() {

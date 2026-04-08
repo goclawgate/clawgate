@@ -74,13 +74,13 @@ That's it. Claude Code now uses ChatGPT.
 If you prefer using an OpenAI API key instead of your ChatGPT subscription:
 
 ```bash
-./clawgate --mode=api --apiKey=sk-...
+clawgate --mode=api --apiKey=sk-...
 ```
 
 You can also point at any OpenAI-compatible endpoint (Azure, local vLLM, ...):
 
 ```bash
-./clawgate --mode=api --apiKey=sk-xxx --baseUrl=https://my.endpoint/v1 --port=9000
+clawgate --mode=api --apiKey=sk-xxx --baseUrl=https://my.endpoint/v1 --port=9000
 ```
 
 ## Configuration
@@ -108,7 +108,7 @@ CI/containers). Precedence: **flag > env > .env > default**.
 Environment-variable form still works unchanged:
 
 ```bash
-AUTH_MODE=apikey OPENAI_API_KEY=sk-... ./clawgate
+AUTH_MODE=apikey OPENAI_API_KEY=sk-... clawgate
 ```
 
 ## Model Mapping

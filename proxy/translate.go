@@ -397,6 +397,11 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 
 	// ── ChatGPT Codex Format ─────────────────────────────────────
 	if cfg.IsChatGPT() {
+		// NOTE: maxTokens is intentionally NOT forwarded to the Codex
+		// request. The ChatGPT backend-api/codex/responses endpoint
+		// rejects max_output_tokens — matching the official Codex CLI
+		// and OpenCode's codex plugin which explicitly strips the field
+		// with the comment "Match codex cli".
 		f := false
 		codexReq := &CodexRequest{
 			Model:        mappedModel,
@@ -800,11 +805,7 @@ func TranslateCodexResponse(resp *CodexResponse, originalModel string) *Anthropi
 		usage.OutputTokens = resp.Usage.OutputTokens
 		if resp.Usage.InputTokensDetails != nil {
 			usage.CacheReadInputTokens = resp.Usage.InputTokensDetails.CachedTokens
-			// `input_tokens` from Codex includes cached tokens; subtract
-			// to give Anthropic clients a closer "fresh" input count.
-			if usage.InputTokens >= usage.CacheReadInputTokens {
-				usage.InputTokens -= usage.CacheReadInputTokens
-			}
+			usage.InputTokens = normalizeCachedInputTokens(usage.InputTokens, usage.CacheReadInputTokens)
 		}
 	}
 
@@ -899,6 +900,16 @@ func translateToolChoice(tc map[string]interface{}, isChatGPT bool) interface{} 
 	default:
 		return "auto"
 	}
+}
+
+// normalizeCachedInputTokens subtracts cachedTokens from inputTokens to
+// give Anthropic clients a "fresh" input count (Codex returns the
+// inclusive total). Used by both TranslateCodexResponse and finalizeStream.
+func normalizeCachedInputTokens(inputTokens, cachedTokens int) int {
+	if cachedTokens > 0 && inputTokens >= cachedTokens {
+		return inputTokens - cachedTokens
+	}
+	return inputTokens
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

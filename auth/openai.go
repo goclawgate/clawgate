@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,27 @@ var Issuer = "https://auth.openai.com"
 // authClient is used for all OAuth HTTP calls so they time out instead
 // of blocking forever when the auth server is unresponsive.
 var authClient = &http.Client{Timeout: 30 * time.Second}
+
+// postForm sends an application/x-www-form-urlencoded POST using the
+// given context, allowing the caller's cancellation to propagate.
+func postForm(ctx context.Context, url string, data url.Values) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return authClient.Do(req)
+}
+
+// postJSON sends an application/json POST using the given context.
+func postJSON(ctx context.Context, url string, body string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return authClient.Do(req)
+}
 
 // Token holds persisted OAuth tokens.
 type Token struct {
@@ -74,11 +96,7 @@ func Login() (*Token, error) {
 
 	// Step 1: Request device code
 	body := fmt.Sprintf(`{"client_id":"%s"}`, ClientID)
-	resp, err := authClient.Post(
-		Issuer+"/api/accounts/deviceauth/usercode",
-		"application/json",
-		strings.NewReader(body),
-	)
+	resp, err := postJSON(context.Background(), Issuer+"/api/accounts/deviceauth/usercode", body)
 	if err != nil {
 		return nil, fmt.Errorf("device code request failed: %w", err)
 	}
@@ -130,7 +148,7 @@ func Login() (*Token, error) {
 
 		if status == 200 && tokenResp != nil {
 			// Step 4: Exchange code for tokens
-			tokens, err := exchangeCode(tokenResp.AuthorizationCode, tokenResp.CodeVerifier)
+			tokens, err := exchangeCode(context.Background(), tokenResp.AuthorizationCode, tokenResp.CodeVerifier)
 			if err != nil {
 				return nil, fmt.Errorf("token exchange failed: %w", err)
 			}
@@ -174,11 +192,7 @@ func Login() (*Token, error) {
 
 func pollDeviceToken(deviceAuthID, userCode string) (*deviceTokenResp, int, error) {
 	body := fmt.Sprintf(`{"device_auth_id":"%s","user_code":"%s"}`, deviceAuthID, userCode)
-	resp, err := authClient.Post(
-		Issuer+"/api/accounts/deviceauth/token",
-		"application/json",
-		strings.NewReader(body),
-	)
+	resp, err := postJSON(context.Background(), Issuer+"/api/accounts/deviceauth/token", body)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -195,7 +209,7 @@ func pollDeviceToken(deviceAuthID, userCode string) (*deviceTokenResp, int, erro
 	return &result, 200, nil
 }
 
-func exchangeCode(authCode, codeVerifier string) (*oauthTokenResp, error) {
+func exchangeCode(ctx context.Context, authCode, codeVerifier string) (*oauthTokenResp, error) {
 	data := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {authCode},
@@ -204,7 +218,7 @@ func exchangeCode(authCode, codeVerifier string) (*oauthTokenResp, error) {
 		"code_verifier": {codeVerifier},
 	}
 
-	resp, err := authClient.PostForm(Issuer+"/oauth/token", data)
+	resp, err := postForm(ctx, Issuer+"/oauth/token", data)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +244,7 @@ func exchangeCode(authCode, codeVerifier string) (*oauthTokenResp, error) {
 // id/access tokens may not contain the account id. In both cases we
 // fall back to the value carried on `prev` so we don't brick the next
 // refresh or drop the account id.
-func Refresh(prev *Token) (*Token, error) {
+func Refresh(ctx context.Context, prev *Token) (*Token, error) {
 	if prev == nil || prev.RefreshToken == "" {
 		return nil, fmt.Errorf("refresh failed: no refresh token available")
 	}
@@ -241,7 +255,7 @@ func Refresh(prev *Token) (*Token, error) {
 		"client_id":     {ClientID},
 	}
 
-	resp, err := authClient.PostForm(Issuer+"/oauth/token", data)
+	resp, err := postForm(ctx, Issuer+"/oauth/token", data)
 	if err != nil {
 		return nil, fmt.Errorf("refresh failed: %w", err)
 	}
