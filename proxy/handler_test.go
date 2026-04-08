@@ -111,17 +111,24 @@ func TestGetTokenSerializesConcurrentRefreshes(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("USERPROFILE", tmpDir) // Windows: os.UserHomeDir checks this
 
-	expiredToken := &auth.Token{
-		AccessToken:  "expired",
-		RefreshToken: "refresh-me",
-		AccountID:    "acct",
-		ExpiresAt:    0, // expired
+	store := &auth.Store{
+		Version:        2,
+		DefaultAccount: "default",
+		Accounts: []auth.StoredAccount{
+			{
+				Name:         "default",
+				AccessToken:  "expired",
+				RefreshToken: "refresh-me",
+				AccountID:    "acct",
+				ExpiresAt:    0, // expired
+			},
+		},
 	}
-	if err := auth.SaveToken(expiredToken); err != nil {
-		t.Fatalf("failed to write expired token: %v", err)
+	if err := auth.SaveStore(store); err != nil {
+		t.Fatalf("failed to write expired store: %v", err)
 	}
 
-	cfg := &config.Config{AuthMode: "chatgpt"}
+	cfg := &config.Config{AuthMode: "chatgpt", AccountName: "default"}
 	h := NewHandler(cfg)
 
 	const goroutines = 10

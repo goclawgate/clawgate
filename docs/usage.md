@@ -57,6 +57,7 @@ All flags are optional. Flags take precedence over environment variables.
 | `--reason` | -- | Reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (reasoning models only) |
 | `--host` | `127.0.0.1` | Bind address (default: localhost only) |
 | `--port` | `8082` | Server port |
+| `--account` | default | Account to use for this run (ChatGPT mode, one-run override) |
 | `--help` | -- | Show help and exit |
 
 Both single-dash and double-dash work: `--mode=api` and `-mode=api` are
@@ -66,10 +67,82 @@ equivalent. Both `--flag=value` and `--flag value` forms are accepted.
 
 | Command | Description |
 |---|---|
-| `clawgate login` | Authenticate with ChatGPT (OAuth device flow) |
-| `clawgate logout` | Remove saved credentials |
-| `clawgate status` | Check login status and token validity |
+| `clawgate login [flags]` | Authenticate with ChatGPT (OAuth device flow) |
+| `clawgate logout [flags]` | Remove saved credentials |
+| `clawgate status [flags]` | Check login status and token validity |
+| `clawgate account list` | List saved accounts (the default is marked with `*`) |
+| `clawgate account use NAME` | Set the persistent default account |
 | `clawgate help` | Show help text |
+
+### `login` flags
+
+| Flag | Description |
+|---|---|
+| `--name NAME` | Account name to save this login under (default: `default`, or the current default if one exists) |
+| `--default` | Make this account the persistent default after login |
+| `--replace` | Overwrite an existing account with the same name |
+
+### `logout` flags
+
+| Flag | Description |
+|---|---|
+| `--account NAME` | Remove a specific account (defaults to the current default) |
+| `--all` | Remove every saved account |
+
+### `status` flags
+
+| Flag | Description |
+|---|---|
+| `--account NAME` | Check a specific account instead of the default |
+
+## Account management
+
+clawgate supports multiple ChatGPT accounts side by side. Each account
+keeps its own OAuth token and can be selected per proxy run without
+disturbing the persistent default.
+
+```bash
+# First login creates an account named "default" and makes it default
+clawgate login
+
+# Add a second account
+clawgate login --name work
+
+# Add a third and immediately make it default
+clawgate login --name personal --default
+
+# List all accounts (* marks the default)
+clawgate account list
+
+# Switch the persistent default
+clawgate account use work
+
+# Start the proxy using a non-default account for this run only
+clawgate --account personal
+
+# Check a specific account's token status
+clawgate status --account work
+
+# Remove a single account
+clawgate logout --account work
+
+# Remove everything
+clawgate logout --all
+```
+
+**Account name rules:** lowercase letters, digits, `.`, `_`, or `-`,
+starting with a letter or digit, 1–32 characters. The name `all` is
+reserved.
+
+**Rules:**
+- `clawgate login` with no `--name` re-authenticates the current default
+  (or creates one named `default` on first use).
+- First account ever saved automatically becomes the default.
+- `--account NAME` on a proxy run is a one-run override; it does NOT
+  change the persistent default.
+- Removing the default account leaves `default_account` empty; the next
+  run asks you to pick one with `clawgate account use NAME`.
+- In API key mode, `--account` is ignored — no auth store is involved.
 
 ## Environment variables
 
@@ -236,7 +309,7 @@ AUTH_MODE=apikey OPENAI_API_KEY=sk-xxx PORT=8082 clawgate
 | Path | Description |
 |---|---|
 | `~/.clawgate/bin/clawgate` | Binary (installed by install script) |
-| `~/.clawgate/token.json` | Saved OAuth token (ChatGPT mode) |
+| `~/.clawgate/token.json` | Account store — holds all saved ChatGPT OAuth accounts and the default selection |
 | `.env` | Optional env file in the working directory |
 
 ## Troubleshooting

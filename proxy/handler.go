@@ -84,36 +84,47 @@ func (h *Handler) getToken(ctx context.Context) (string, string, error) {
 
 	// Fast path: read the current token under the read lock.
 	h.mu.RLock()
-	token, err := auth.LoadToken()
-	h.mu.RUnlock()
+	store, err := auth.LoadStore()
 	if err != nil {
+		h.mu.RUnlock()
 		return "", "", fmt.Errorf("no saved token — run 'clawgate login' first")
 	}
+	acct, err := store.ResolveAccount(h.Cfg.AccountName)
+	h.mu.RUnlock()
+	if err != nil {
+		return "", "", fmt.Errorf("account resolution failed: %w", err)
+	}
 
+	token := acct.Token()
 	if token.IsExpired() {
 		// Slow path: acquire the write lock, then re-check. If another
 		// goroutine already refreshed the token while we were waiting,
 		// we'll see the fresh value here and skip the refresh.
 		h.mu.Lock()
-		token, err = auth.LoadToken()
+		store, err = auth.LoadStore()
 		if err != nil {
 			h.mu.Unlock()
 			return "", "", fmt.Errorf("no saved token — run 'clawgate login' first")
 		}
+		acct, err = store.ResolveAccount(h.Cfg.AccountName)
+		if err != nil {
+			h.mu.Unlock()
+			return "", "", fmt.Errorf("account resolution failed: %w", err)
+		}
+		token = acct.Token()
 		if token.IsExpired() {
-			fmt.Println("🔄 Refreshing access token...")
+			fmt.Println("Refreshing access token...")
 			newToken, refreshErr := auth.Refresh(ctx, token)
 			if refreshErr != nil {
 				h.mu.Unlock()
 				return "", "", fmt.Errorf("token refresh failed: %w", refreshErr)
 			}
-			if saveErr := auth.SaveToken(newToken); saveErr != nil {
-				fmt.Printf("  ⚠️  Could not persist refreshed token: %v\n", saveErr)
+			acct.FromToken(newToken)
+			if saveErr := auth.SaveStore(store); saveErr != nil {
+				fmt.Printf("  Could not persist refreshed token: %v\n", saveErr)
 			}
 			token = newToken
 		}
-		h.Cfg.AccessToken = token.AccessToken
-		h.Cfg.AccountID = token.AccountID
 		h.mu.Unlock()
 	}
 
@@ -273,7 +284,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Streaming
 	if req.Stream {
-		HandleStream(w, resp.Body, originalModel, h.Cfg.IsChatGPT())
+		HandleStream(w, resp.Body, originalModel, h.Cfg.IsChatGPT(), estimateAnthropicTokens(body))
 		return
 	}
 

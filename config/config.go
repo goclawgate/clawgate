@@ -59,9 +59,9 @@ type Config struct {
 	Host string
 	Port string
 
-	// Runtime: set after auth
-	AccessToken string
-	AccountID   string
+	// AccountName selects which stored account to use (ChatGPT mode).
+	// Empty means "use the default account".
+	AccountName string
 }
 
 // FlagOverrides carries values that were explicitly set on the command
@@ -77,6 +77,7 @@ type FlagOverrides struct {
 	ReasoningEffort *string
 	Host            *string
 	Port            *string
+	AccountName     *string
 }
 
 // Load reads .env and environment variables, then layers CLI flag
@@ -132,6 +133,9 @@ func Load(overrides FlagOverrides) *Config {
 	}
 	if overrides.Port != nil && *overrides.Port != "" {
 		cfg.Port = *overrides.Port
+	}
+	if overrides.AccountName != nil && *overrides.AccountName != "" {
+		cfg.AccountName = *overrides.AccountName
 	}
 
 	// Normalise the reasoning effort: lowercased & trimmed so the

@@ -36,7 +36,7 @@ func TestHandleStreamCodexParallelToolCalls(t *testing.T) {
 	}, "\n\n")
 
 	w := httptest.NewRecorder()
-	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true)
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
 
 	out := w.Body.String()
 
@@ -82,7 +82,7 @@ func TestHandleStreamCodexReasoningStopReason(t *testing.T) {
 	}, "\n\n")
 
 	w := httptest.NewRecorder()
-	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true)
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
 	out := w.Body.String()
 
 	// Must contain thinking block (so we know reasoning was handled).
@@ -121,7 +121,7 @@ func TestHandleStreamCodexReasoningThenToolInterleave(t *testing.T) {
 	}, "\n\n")
 
 	w := httptest.NewRecorder()
-	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true)
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
 	out := w.Body.String()
 
 	// Reasoning block should be at index 1 (after text block 0)
@@ -183,7 +183,7 @@ func TestHandleStreamCodexIncompleteReasonMapping(t *testing.T) {
 			}, "\n\n")
 
 			w := httptest.NewRecorder()
-			HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true)
+			HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
 			out := w.Body.String()
 
 			want := `"stop_reason":"` + tt.wantStop + `"`
@@ -205,7 +205,7 @@ func TestHandleStreamCodexSingleToolCall(t *testing.T) {
 	}, "\n\n")
 
 	w := httptest.NewRecorder()
-	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true)
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
 	out := w.Body.String()
 
 	if !strings.Contains(out, `{"delta":{"partial_json":"{\"path\":\".\"}","type":"input_json_delta"},"index":1,"type":"content_block_delta"}`) {

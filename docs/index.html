@@ -683,7 +683,12 @@ clawgate login
 clawgate
 
 <span class="comment"># connect Claude Code</span>
-ANTHROPIC_BASE_URL=http://localhost:8082 claude</code></pre>
+ANTHROPIC_BASE_URL=http://localhost:8082 claude
+
+<span class="comment"># multiple accounts? juggle them</span>
+clawgate login --name work
+clawgate account use work
+clawgate --account personal</code></pre>
       </div>
       <div class="usage-card">
         <h3>API Key Mode</h3>

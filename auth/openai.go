@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -170,12 +168,6 @@ func Login() (*Token, error) {
 				ExpiresAt:    time.Now().Unix() + int64(expiresIn),
 			}
 
-			if err := SaveToken(token); err != nil {
-				fmt.Printf("  ⚠️  Could not save token: %v\n", err)
-				fmt.Println("  ✅ Authenticated (token NOT persisted — will need re-login)")
-			} else {
-				fmt.Println("  ✅ Authenticated successfully!")
-			}
 			return token, nil
 		}
 
@@ -352,36 +344,6 @@ func extractAccountID(token string) string {
 	return ""
 }
 
-// ── Token Persistence ────────────────────────────────────────────────
-
-func tokenPath() string {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".clawgate")
-	os.MkdirAll(dir, 0700)
-	return filepath.Join(dir, "token.json")
-}
-
-func LoadToken() (*Token, error) {
-	data, err := os.ReadFile(tokenPath())
-	if err != nil {
-		return nil, err
-	}
-	var t Token
-	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, err
-	}
-	if t.AccessToken == "" {
-		return nil, fmt.Errorf("empty token")
-	}
-	return &t, nil
-}
-
-func SaveToken(t *Token) error {
-	data, _ := json.MarshalIndent(t, "", "  ")
-	return os.WriteFile(tokenPath(), data, 0600)
-}
-
-func Logout() {
-	os.Remove(tokenPath())
-	fmt.Println("✅ Logged out — token removed")
-}
+// Token persistence (tokenPath, LoadToken, SaveToken, Logout) is now
+// in accounts.go. The functions are kept with the same signatures for
+// backward compatibility.

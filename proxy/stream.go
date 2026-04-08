@@ -42,7 +42,11 @@ type StreamFunctionCall struct {
 }
 
 // HandleStream reads OpenAI SSE stream and writes Anthropic-format SSE events.
-func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel string, isChatGPT bool) {
+// estimatedInputTokens is a best-effort prompt token count derived from the
+// original Anthropic request; it is emitted in the message_start event so
+// that clients (e.g. Claude Code) can display per-request usage immediately
+// rather than waiting for the final message_delta.
+func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel string, isChatGPT bool, estimatedInputTokens int) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -67,7 +71,7 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 			"stop_reason":   nil,
 			"stop_sequence": nil,
 			"usage": map[string]interface{}{
-				"input_tokens":                0,
+				"input_tokens":                estimatedInputTokens,
 				"cache_creation_input_tokens": 0,
 				"cache_read_input_tokens":     0,
 				"output_tokens":               0,
@@ -451,9 +455,7 @@ func finalizeStream(w http.ResponseWriter, f http.Flusher, textBlockClosed bool,
 	}
 	usage := map[string]interface{}{
 		"output_tokens": outputTokens,
-	}
-	if inputTokens > 0 {
-		usage["input_tokens"] = normalizeCachedInputTokens(inputTokens, cachedTokens)
+		"input_tokens":  normalizeCachedInputTokens(inputTokens, cachedTokens),
 	}
 	if cachedTokens > 0 {
 		usage["cache_read_input_tokens"] = cachedTokens

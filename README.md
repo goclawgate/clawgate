@@ -75,6 +75,16 @@ clawgate
 ANTHROPIC_BASE_URL=http://localhost:8082 claude
 ```
 
+**Multiple accounts?** clawgate can juggle personal, work, and org logins side by side:
+
+```bash
+clawgate login --name work                  # add a second account
+clawgate login --name personal --default    # add a third and make it default
+clawgate account list                       # see them all, * marks default
+clawgate account use work                   # switch the persistent default
+clawgate --account personal                 # one-run override
+```
+
 ### API key mode
 
 Use a standard OpenAI (or compatible) API key instead:
@@ -121,6 +131,7 @@ All settings are optional. **Precedence: flag > env > .env > default.**
 | `--reason` | `REASON` | — | Reasoning effort: `none` / `minimal` / `low` / `medium` / `high` / `xhigh` |
 | `--host` | `HOST` | `127.0.0.1` | Bind address |
 | `--port` | `PORT` | `8082` | Server port |
+| `--account` | — | default | Account to use for this run (ChatGPT mode) |
 
 Environment variables and `.env` files work as fallback (useful for CI/Docker):
 
