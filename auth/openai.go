@@ -30,6 +30,10 @@ const (
 // (not a const) so tests can point it at a local httptest.Server.
 var Issuer = "https://auth.openai.com"
 
+// authClient is used for all OAuth HTTP calls so they time out instead
+// of blocking forever when the auth server is unresponsive.
+var authClient = &http.Client{Timeout: 30 * time.Second}
+
 // Token holds persisted OAuth tokens.
 type Token struct {
 	AccessToken  string `json:"access_token"`
@@ -70,7 +74,7 @@ func Login() (*Token, error) {
 
 	// Step 1: Request device code
 	body := fmt.Sprintf(`{"client_id":"%s"}`, ClientID)
-	resp, err := http.Post(
+	resp, err := authClient.Post(
 		Issuer+"/api/accounts/deviceauth/usercode",
 		"application/json",
 		strings.NewReader(body),
@@ -170,7 +174,7 @@ func Login() (*Token, error) {
 
 func pollDeviceToken(deviceAuthID, userCode string) (*deviceTokenResp, int, error) {
 	body := fmt.Sprintf(`{"device_auth_id":"%s","user_code":"%s"}`, deviceAuthID, userCode)
-	resp, err := http.Post(
+	resp, err := authClient.Post(
 		Issuer+"/api/accounts/deviceauth/token",
 		"application/json",
 		strings.NewReader(body),
@@ -200,7 +204,7 @@ func exchangeCode(authCode, codeVerifier string) (*oauthTokenResp, error) {
 		"code_verifier": {codeVerifier},
 	}
 
-	resp, err := http.PostForm(Issuer+"/oauth/token", data)
+	resp, err := authClient.PostForm(Issuer+"/oauth/token", data)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +241,7 @@ func Refresh(prev *Token) (*Token, error) {
 		"client_id":     {ClientID},
 	}
 
-	resp, err := http.PostForm(Issuer+"/oauth/token", data)
+	resp, err := authClient.PostForm(Issuer+"/oauth/token", data)
 	if err != nil {
 		return nil, fmt.Errorf("refresh failed: %w", err)
 	}

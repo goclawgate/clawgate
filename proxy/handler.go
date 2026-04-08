@@ -5,6 +5,7 @@ import (
 	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,8 @@ import (
 	"github.com/goclawgate/clawgate/auth"
 	"github.com/goclawgate/clawgate/config"
 )
+
+const maxRequestBytes = 100 << 20 // 100 MB
 
 // debug is evaluated once at startup so per-request hot paths don't
 // pay the cost of re-reading the environment on every call.
@@ -170,9 +173,15 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "failed to read request body")
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeAnthropicError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		} else {
+			writeAnthropicError(w, http.StatusBadRequest, "failed to read request body")
+		}
 		return
 	}
 	defer r.Body.Close()
@@ -321,9 +330,15 @@ func (h *Handler) handleTokenCount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "failed to read body")
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeAnthropicError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		} else {
+			writeAnthropicError(w, http.StatusBadRequest, "failed to read body")
+		}
 		return
 	}
 	defer r.Body.Close()

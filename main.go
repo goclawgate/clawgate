@@ -66,6 +66,7 @@ func main() {
 		flagSmallModel = fs.String("smallModel", "", "Model for haiku requests")
 		flagFast       = fs.Bool("fast", false, "Enable fast mode (service_tier: priority)")
 		flagReason     = fs.String("reason", "", "Reasoning effort: none|minimal|low|medium|high|xhigh (reasoning models only)")
+		flagHost       = fs.String("host", "", "Bind address (default: 127.0.0.1)")
 		flagPort       = fs.String("port", "", "Server port")
 		flagHelp       = fs.Bool("help", false, "Show help and exit")
 	)
@@ -94,6 +95,7 @@ func main() {
 		SmallModel:      flagSmallModel,
 		FastMode:        flagFast,
 		ReasoningEffort: flagReason,
+		Host:            flagHost,
 		Port:            flagPort,
 	}
 	cfg := config.Load(overrides)
@@ -128,13 +130,13 @@ func main() {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	addr := ":" + cfg.Port
+	addr := cfg.Host + ":" + cfg.Port
 	mode := "API Key"
 	if cfg.IsChatGPT() {
 		mode = "ChatGPT Codex (OAuth)"
 	}
 
-	listen := "http://localhost:" + cfg.Port
+	listen := "http://" + cfg.Host + ":" + cfg.Port
 	envLine := "ANTHROPIC_BASE_URL=" + listen
 	fmt.Println("┌────────────────────────────────────────────────────┐")
 	fmt.Println("│        clawgate — Anthropic ↔ OpenAI Proxy         │")
@@ -203,6 +205,7 @@ Flags:
   --reason       Reasoning effort for reasoning models. One of:
                  none, minimal, low, medium, high, xhigh.
                  Per-request Anthropic 'thinking' field still wins.
+  --host         Bind address (default: 127.0.0.1)
   --port         Server port (default: 8082)
   --help, -h     Show this help
 
@@ -218,6 +221,6 @@ Examples:
 
 Environment variables are honoured as a fallback (useful for CI/containers):
   AUTH_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, BIG_MODEL, MID_MODEL, SMALL_MODEL,
-  FAST_MODE, REASON, PORT
+  FAST_MODE, REASON, HOST, PORT
   (REASONING_EFFORT is also accepted as an alias for REASON.)`)
 }

@@ -102,6 +102,7 @@ CI/containers). Precedence: **flag > env > .env > default**.
 | `--smallModel` | `SMALL_MODEL` | `gpt-5.2-codex` | Model for haiku requests |
 | `--fast` | `FAST_MODE` | off | Send `service_tier: priority` in API requests |
 | `--reason` | `REASON` | — | Reasoning effort for reasoning models: `none\|minimal\|low\|medium\|high\|xhigh` |
+| `--host` | `HOST` | `127.0.0.1` | Bind address |
 | `--port` | `PORT` | `8082` | Server port |
 
 Environment-variable form still works unchanged:

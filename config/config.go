@@ -56,6 +56,7 @@ type Config struct {
 	ReasoningEffort string
 
 	// Server
+	Host string
 	Port string
 
 	// Runtime: set after auth
@@ -74,6 +75,7 @@ type FlagOverrides struct {
 	SmallModel      *string
 	FastMode        *bool
 	ReasoningEffort *string
+	Host            *string
 	Port            *string
 }
 
@@ -96,6 +98,7 @@ func Load(overrides FlagOverrides) *Config {
 		SmallModel:      env("SMALL_MODEL", "gpt-5.2-codex"),
 		FastMode:        envBool("FAST_MODE"),
 		ReasoningEffort: reasonEnv,
+		Host:            env("HOST", "127.0.0.1"),
 		Port:            env("PORT", "8082"),
 	}
 
@@ -123,6 +126,9 @@ func Load(overrides FlagOverrides) *Config {
 	}
 	if overrides.ReasoningEffort != nil && *overrides.ReasoningEffort != "" {
 		cfg.ReasoningEffort = *overrides.ReasoningEffort
+	}
+	if overrides.Host != nil && *overrides.Host != "" {
+		cfg.Host = *overrides.Host
 	}
 	if overrides.Port != nil && *overrides.Port != "" {
 		cfg.Port = *overrides.Port

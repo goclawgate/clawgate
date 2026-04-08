@@ -55,6 +55,7 @@ All flags are optional. Flags take precedence over environment variables.
 | `--smallModel` | `gpt-5.2-codex` | Model for haiku requests |
 | `--fast` | off | Enable fast mode (sends `service_tier: priority`) |
 | `--reason` | -- | Reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (reasoning models only) |
+| `--host` | `127.0.0.1` | Bind address (default: localhost only) |
 | `--port` | `8082` | Server port |
 | `--help` | -- | Show help and exit |
 
@@ -85,6 +86,7 @@ for CI/CD, Docker, and other automated setups.
 | `SMALL_MODEL` | `--smallModel` |
 | `FAST_MODE` | `--fast` |
 | `REASON` | `--reason` (alias: `REASONING_EFFORT`) |
+| `HOST` | `--host` |
 | `PORT` | `--port` |
 | `DEBUG` | -- (set to `1` to enable debug logging) |
 
