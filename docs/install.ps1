@@ -35,8 +35,20 @@ try {
 if (-not (Test-Path $installDir)) {
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 }
-Move-Item -Force $tmpFile "$installDir\$binary"
-Write-Host "  Installed to $installDir\$binary"
+$dest = "$installDir\$binary"
+$old  = "$dest.old"
+# Clean up leftover .old from a previous upgrade
+if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
+if (Test-Path $dest) {
+    try {
+        Remove-Item $dest -Force
+    } catch {
+        # Binary is running — rename it out of the way (Windows allows this)
+        Rename-Item $dest $old -Force
+    }
+}
+Move-Item -Force $tmpFile $dest
+Write-Host "  Installed to $dest"
 
 # Add to PATH
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
