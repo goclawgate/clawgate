@@ -31,6 +31,34 @@ try {
     exit 1
 }
 
+# Verify checksum
+$checksumUrl = "https://github.com/$repo/releases/latest/download/checksums.txt"
+Write-Host "  Verifying checksum..."
+try {
+    $checksumData = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
+    $expectedLine = ($checksumData -split "`n") | Where-Object { $_ -match $asset }
+    if ($expectedLine) {
+        $expected = ($expectedLine -split "\s+")[0]
+        $actual = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
+        if ($actual -ne $expected) {
+            Write-Host ""
+            Write-Host "  ERROR: Checksum verification failed!" -ForegroundColor Red
+            Write-Host "  Expected: $expected"
+            Write-Host "  Actual:   $actual"
+            Write-Host ""
+            Write-Host "  The downloaded binary may have been tampered with." -ForegroundColor Red
+            Write-Host "  Aborting installation."
+            if (Test-Path $tmpFile) { Remove-Item $tmpFile -Force }
+            exit 1
+        }
+        Write-Host "  Checksum OK ($expected)"
+    } else {
+        Write-Host "  Warning: No checksum found for $asset — skipping verification." -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "  Warning: Could not download checksums.txt — skipping verification." -ForegroundColor Yellow
+}
+
 # Install
 if (-not (Test-Path $installDir)) {
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null

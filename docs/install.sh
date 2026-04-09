@@ -76,7 +76,8 @@ echo "  Arch: $ARCH"
 echo ""
 
 TMPFILE="$(mktemp)"
-trap 'rm -f "$TMPFILE"' EXIT
+CHECKSUMS="$(mktemp)"
+trap 'rm -f "$TMPFILE" "$CHECKSUMS"' EXIT
 
 echo "  Downloading from GitHub..."
 if ! download "$URL" "$TMPFILE"; then
@@ -84,6 +85,40 @@ if ! download "$URL" "$TMPFILE"; then
     echo "  Error: Download failed." >&2
     echo "  Check https://github.com/${REPO}/releases for available assets." >&2
     exit 1
+fi
+
+# ── Verify checksum ─────────────────────────────────────────────────
+
+CHECKSUM_URL="https://github.com/${REPO}/releases/latest/download/checksums.txt"
+
+echo "  Verifying checksum..."
+if ! download "$CHECKSUM_URL" "$CHECKSUMS"; then
+    echo "  Warning: Could not download checksums.txt — skipping verification." >&2
+else
+    EXPECTED=$(grep "${ASSET}$" "$CHECKSUMS" | awk '{print $1}')
+    if [ -z "$EXPECTED" ]; then
+        echo "  Warning: No checksum found for ${ASSET} — skipping verification." >&2
+    else
+        if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL=$(sha256sum "$TMPFILE" | awk '{print $1}')
+        elif command -v shasum >/dev/null 2>&1; then
+            ACTUAL=$(shasum -a 256 "$TMPFILE" | awk '{print $1}')
+        else
+            echo "  Warning: No SHA256 tool found — skipping verification." >&2
+            ACTUAL="$EXPECTED"
+        fi
+        if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo ""
+            echo "  ERROR: Checksum verification failed!" >&2
+            echo "  Expected: $EXPECTED" >&2
+            echo "  Actual:   $ACTUAL" >&2
+            echo ""
+            echo "  The downloaded binary may have been tampered with." >&2
+            echo "  Aborting installation." >&2
+            exit 1
+        fi
+        echo "  Checksum OK ($EXPECTED)"
+    fi
 fi
 
 # ── Install ──────────────────────────────────────────────────────────
