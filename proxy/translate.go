@@ -22,6 +22,12 @@ type AnthropicRequest struct {
 	Tools         []AnthropicTool        `json:"tools,omitempty"`
 	ToolChoice    map[string]interface{} `json:"tool_choice,omitempty"`
 	Thinking      map[string]interface{} `json:"thinking,omitempty"`
+	Speed         string                 `json:"speed,omitempty"`
+	OutputConfig  *OutputConfig          `json:"output_config,omitempty"`
+}
+
+type OutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type AnthropicMessage struct {
@@ -364,17 +370,21 @@ func resolveReasoningEffort(cfg *config.Config, req *AnthropicRequest) string {
 	thinkingEffort := reasoningEffortFromThinking(req.Thinking)
 	flagEffort := cfg.ReasoningEffort
 
-	if thinkingEffort == "" {
-		return flagEffort
+	// output_config.effort is a direct effort string from Claude Code
+	var outputEffort string
+	if req.OutputConfig != nil && req.OutputConfig.Effort != "" {
+		outputEffort = req.OutputConfig.Effort
 	}
-	if flagEffort == "" {
-		return thinkingEffort
+
+	// Return whichever ranks highest among the three signals.
+	best := thinkingEffort
+	if effortRank(flagEffort) > effortRank(best) {
+		best = flagEffort
 	}
-	// Both set — return whichever ranks higher.
-	if effortRank(flagEffort) > effortRank(thinkingEffort) {
-		return flagEffort
+	if effortRank(outputEffort) > effortRank(best) {
+		best = outputEffort
 	}
-	return thinkingEffort
+	return best
 }
 
 // reasoningEffortFromThinking maps Anthropic's `thinking` field
@@ -384,8 +394,7 @@ func reasoningEffortFromThinking(thinking map[string]interface{}) string {
 	if thinking == nil {
 		return ""
 	}
-	if t, _ := thinking["type"].(string); t != "" && t != "enabled" {
-		// "disabled" or unknown — no reasoning override
+	if t, _ := thinking["type"].(string); t == "disabled" {
 		return ""
 	}
 	if budget, ok := thinking["budget_tokens"].(float64); ok {
@@ -566,7 +575,7 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 			codexReq.ToolChoice = choice
 		}
 
-		if cfg.FastMode {
+		if cfg.FastMode || req.Speed == "fast" {
 			codexReq.ServiceTier = "priority"
 		}
 
@@ -689,7 +698,7 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 	} else if effort := resolveReasoningEffort(cfg, req); effort != "" {
 		oaiReq.ReasoningEffort = effort
 	}
-	if cfg.FastMode {
+	if cfg.FastMode || req.Speed == "fast" {
 		oaiReq.ServiceTier = "priority"
 	}
 

@@ -72,6 +72,8 @@ func TestReasoningEffortFromThinking(t *testing.T) {
 		{"minimal: budget=1", map[string]interface{}{"type": "enabled", "budget_tokens": float64(1)}, "minimal"},
 		{"none: budget=0", map[string]interface{}{"type": "enabled", "budget_tokens": float64(0)}, "none"},
 		{"none: budget=-1", map[string]interface{}{"type": "enabled", "budget_tokens": float64(-1)}, "none"},
+		{"adaptive no budget", map[string]interface{}{"type": "adaptive"}, "medium"},
+		{"adaptive with budget", map[string]interface{}{"type": "adaptive", "budget_tokens": float64(20000)}, "high"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -917,5 +919,80 @@ func TestTranslateRequestOpenAIFastMode(t *testing.T) {
 	}
 	if oai.ServiceTier != "priority" {
 		t.Errorf("expected service_tier=priority, got %q", oai.ServiceTier)
+	}
+}
+
+func TestTranslateRequest_SpeedFast_Codex(t *testing.T) {
+	cfg := newCfg(true)
+	// FastMode is false, but Speed is "fast"
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Speed:     "fast",
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	codex, ok := out.(*CodexRequest)
+	if !ok {
+		t.Fatalf("expected *CodexRequest, got %T", out)
+	}
+	if codex.ServiceTier != "priority" {
+		t.Errorf("expected service_tier=priority from speed=fast, got %q", codex.ServiceTier)
+	}
+}
+
+func TestTranslateRequest_SpeedFast_OpenAI(t *testing.T) {
+	cfg := newCfg(false)
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Speed:     "fast",
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	oai, ok := out.(*OpenAIRequest)
+	if !ok {
+		t.Fatalf("expected *OpenAIRequest, got %T", out)
+	}
+	if oai.ServiceTier != "priority" {
+		t.Errorf("expected service_tier=priority from speed=fast, got %q", oai.ServiceTier)
+	}
+}
+
+func TestResolveReasoningEffort_OutputConfigOnly(t *testing.T) {
+	cfg := newCfg(true)
+	req := &AnthropicRequest{
+		OutputConfig: &OutputConfig{Effort: "high"},
+	}
+	if got := resolveReasoningEffort(cfg, req); got != "high" {
+		t.Errorf("expected high, got %q", got)
+	}
+}
+
+func TestResolveReasoningEffort_OutputConfigBeatsThinking(t *testing.T) {
+	cfg := newCfg(true)
+	req := &AnthropicRequest{
+		Thinking:     map[string]interface{}{"type": "enabled", "budget_tokens": float64(20000)},
+		OutputConfig: &OutputConfig{Effort: "xhigh"},
+	}
+	// thinking → high, output_config → xhigh; xhigh wins
+	if got := resolveReasoningEffort(cfg, req); got != "xhigh" {
+		t.Errorf("expected xhigh, got %q", got)
+	}
+}
+
+func TestResolveReasoningEffort_ThinkingBeatsOutputConfig(t *testing.T) {
+	cfg := newCfg(true)
+	req := &AnthropicRequest{
+		Thinking:     map[string]interface{}{"type": "enabled", "budget_tokens": float64(32000)},
+		OutputConfig: &OutputConfig{Effort: "low"},
+	}
+	// thinking → xhigh, output_config → low; xhigh wins
+	if got := resolveReasoningEffort(cfg, req); got != "xhigh" {
+		t.Errorf("expected xhigh, got %q", got)
 	}
 }
