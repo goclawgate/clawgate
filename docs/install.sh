@@ -132,6 +132,7 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 mv "$TMPFILE" "${INSTALL_DIR}/${BINARY}"
+rm -f "$CHECKSUMS"
 trap - EXIT
 
 echo "  Installed to ${INSTALL_DIR}/${BINARY}"

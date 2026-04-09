@@ -35,8 +35,9 @@ try {
 $checksumUrl = "https://github.com/$repo/releases/latest/download/checksums.txt"
 Write-Host "  Verifying checksum..."
 try {
-    $checksumData = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
-    $expectedLine = ($checksumData -split "`n") | Where-Object { $_ -match $asset }
+    $raw = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing).Content
+    if ($raw -is [byte[]]) { $raw = [System.Text.Encoding]::UTF8.GetString($raw) }
+    $expectedLine = ($raw -split "`n") | Where-Object { $_ -match $asset }
     if ($expectedLine) {
         $expected = ($expectedLine -split "\s+")[0]
         $actual = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()

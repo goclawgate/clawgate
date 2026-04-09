@@ -17,4 +17,4 @@ release: clean
 	GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o builds/clawgate-darwin-amd64 .
 	GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o builds/clawgate-darwin-arm64 .
 	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o builds/clawgate-windows-amd64.exe .
-	cd builds && sha256sum * > checksums.txt
+	cd builds && sha256sum clawgate-* > checksums.txt
