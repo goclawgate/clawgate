@@ -702,6 +702,204 @@ func TestTranslateRequestCodexDoesNotForwardMaxTokens(t *testing.T) {
 	}
 }
 
+func TestIsAnthropicWebSearchTool(t *testing.T) {
+	tests := []struct {
+		name string
+		tool AnthropicTool
+		want bool
+	}{
+		{"typed web_search", AnthropicTool{Type: "web_search_20250305", Name: "web_search"}, true},
+		{"future version", AnthropicTool{Type: "web_search_20260101", Name: "web_search"}, true},
+		{"fallback no type", AnthropicTool{Name: "web_search"}, true},
+		{"regular function", AnthropicTool{Name: "read_file", InputSchema: map[string]interface{}{"type": "object"}}, false},
+		{"web_search with schema", AnthropicTool{Name: "web_search", InputSchema: map[string]interface{}{"type": "object"}}, false},
+		{"custom type", AnthropicTool{Type: "custom", Name: "web_search"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAnthropicWebSearchTool(tt.tool); got != tt.want {
+				t.Errorf("isAnthropicWebSearchTool(%+v) = %v, want %v", tt.tool, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTranslateCodexToolsWebSearch(t *testing.T) {
+	tools := []AnthropicTool{
+		{Type: "web_search_20250305", Name: "web_search"},
+		{Name: "read_file", InputSchema: map[string]interface{}{"type": "object"}},
+	}
+	out := translateCodexTools(tools)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(out))
+	}
+	if out[0].Type != "web_search" || out[0].Name != "" {
+		t.Errorf("expected native web_search tool, got %+v", out[0])
+	}
+	if out[1].Type != "function" || out[1].Name != "read_file" {
+		t.Errorf("expected function tool, got %+v", out[1])
+	}
+	// Verify JSON shape matches Codex CLI: {"type":"web_search"}
+	b, _ := json.Marshal(out[0])
+	if string(b) != `{"type":"web_search"}` {
+		t.Errorf("web_search JSON = %s, want {\"type\":\"web_search\"}", string(b))
+	}
+}
+
+func TestTranslateOpenAIToolsDropsWebSearch(t *testing.T) {
+	tools := []AnthropicTool{
+		{Type: "web_search_20250305", Name: "web_search"},
+		{Name: "read_file", InputSchema: map[string]interface{}{"type": "object"}},
+	}
+	out := translateOpenAITools(tools)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 tool (web_search dropped), got %d", len(out))
+	}
+	if out[0].Function.Name != "read_file" {
+		t.Errorf("expected read_file, got %s", out[0].Function.Name)
+	}
+}
+
+func TestTranslateCodexResponseWebSearchCall(t *testing.T) {
+	resp := &CodexResponse{
+		ID:    "resp_ws",
+		Model: "gpt-5.4",
+		Output: []CodexOutputItem{
+			{
+				Type: "web_search_call",
+				ID:   "ws_1",
+				Action: map[string]interface{}{
+					"type":  "web_search",
+					"query": "latest Go release",
+					"sources": []interface{}{
+						map[string]interface{}{"url": "https://go.dev/blog/go1.24", "title": "Go 1.24 Release Notes"},
+						map[string]interface{}{"url": "https://example.com/go", "title": "Go News"},
+					},
+				},
+			},
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []CodexOutputContent{
+					{Type: "output_text", Text: "Go 1.24 was released."},
+				},
+			},
+		},
+		Usage: &CodexUsage{InputTokens: 50, OutputTokens: 20},
+	}
+	out := TranslateCodexResponse(resp, "claude-3-5-sonnet")
+	// web_search is server-side — stop_reason must be end_turn, not tool_use
+	if out.StopReason == nil || *out.StopReason != "end_turn" {
+		t.Errorf("expected stop_reason end_turn, got %v", out.StopReason)
+	}
+	// Should have: server_tool_use + web_search_tool_result + text = 3
+	if len(out.Content) != 3 {
+		t.Fatalf("expected 3 content blocks, got %d: %+v", len(out.Content), out.Content)
+	}
+	if out.Content[0]["type"] != "server_tool_use" {
+		t.Errorf("first block should be server_tool_use, got %v", out.Content[0]["type"])
+	}
+	if out.Content[0]["name"] != "web_search" {
+		t.Errorf("server_tool_use name should be web_search, got %v", out.Content[0]["name"])
+	}
+	input, _ := out.Content[0]["input"].(map[string]interface{})
+	if input["query"] != "latest Go release" {
+		t.Errorf("query should be 'latest Go release', got %v", input["query"])
+	}
+	if out.Content[1]["type"] != "web_search_tool_result" {
+		t.Errorf("second block should be web_search_tool_result, got %v", out.Content[1]["type"])
+	}
+	// Verify sources are populated in web_search_tool_result content
+	resultContent, ok := out.Content[1]["content"].([]interface{})
+	if !ok {
+		t.Fatalf("web_search_tool_result content should be []interface{}, got %T", out.Content[1]["content"])
+	}
+	if len(resultContent) != 2 {
+		t.Fatalf("expected 2 search results, got %d", len(resultContent))
+	}
+	first, _ := resultContent[0].(map[string]interface{})
+	if first["type"] != "web_search_result" {
+		t.Errorf("expected web_search_result type, got %v", first["type"])
+	}
+	if first["url"] != "https://go.dev/blog/go1.24" {
+		t.Errorf("expected first url, got %v", first["url"])
+	}
+	if first["title"] != "Go 1.24 Release Notes" {
+		t.Errorf("expected first title, got %v", first["title"])
+	}
+	if out.Content[2]["type"] != "text" {
+		t.Errorf("third block should be text, got %v", out.Content[2]["type"])
+	}
+}
+
+func TestTranslateCodexResponseWebSearchCallNoSources(t *testing.T) {
+	resp := &CodexResponse{
+		ID:    "resp_ws_ns",
+		Model: "gpt-5.4",
+		Output: []CodexOutputItem{
+			{
+				Type: "web_search_call",
+				ID:   "ws_2",
+				Action: map[string]interface{}{
+					"type":  "web_search",
+					"query": "test query",
+				},
+			},
+		},
+		Usage: &CodexUsage{InputTokens: 10, OutputTokens: 5},
+	}
+	out := TranslateCodexResponse(resp, "claude-3-5-sonnet")
+	if len(out.Content) != 2 {
+		t.Fatalf("expected 2 content blocks (server_tool_use + result), got %d", len(out.Content))
+	}
+	resultContent, ok := out.Content[1]["content"].([]interface{})
+	if !ok {
+		t.Fatalf("content should be []interface{}, got %T", out.Content[1]["content"])
+	}
+	if len(resultContent) != 0 {
+		t.Errorf("expected empty content when no sources, got %d items", len(resultContent))
+	}
+}
+
+func TestTranslateRequestCodexIncludeWebSearchSources(t *testing.T) {
+	cfg := newCfg(true)
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"search for Go 1.24"`)},
+		},
+		Tools: []AnthropicTool{
+			{Type: "web_search_20250305", Name: "web_search"},
+			{Name: "read_file", InputSchema: map[string]interface{}{"type": "object"}},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	codex := out.(*CodexRequest)
+	if len(codex.Include) != 1 || codex.Include[0] != "web_search_call.action.sources" {
+		t.Errorf("expected include=[web_search_call.action.sources], got %v", codex.Include)
+	}
+}
+
+func TestTranslateRequestCodexNoIncludeWithoutWebSearch(t *testing.T) {
+	cfg := newCfg(true)
+	req := &AnthropicRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 1024,
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"test"`)},
+		},
+		Tools: []AnthropicTool{
+			{Name: "read_file", InputSchema: map[string]interface{}{"type": "object"}},
+		},
+	}
+	out, _, _ := TranslateRequest(req, cfg)
+	codex := out.(*CodexRequest)
+	if len(codex.Include) != 0 {
+		t.Errorf("expected empty include without web_search, got %v", codex.Include)
+	}
+}
+
 func TestTranslateRequestOpenAIFastMode(t *testing.T) {
 	cfg := newCfg(false)
 	cfg.FastMode = true

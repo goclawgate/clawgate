@@ -463,9 +463,6 @@ func anthropicErrorType(status int) string {
 	case http.StatusRequestEntityTooLarge:
 		return "request_too_large"
 	default:
-		if status >= 500 {
-			return "api_error"
-		}
 		return "api_error"
 	}
 }

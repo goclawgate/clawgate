@@ -101,9 +101,11 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 		reasoningBlockOpen  bool           // tracks whether a reasoning block is currently open
 		reasoningBlockIdx   int            // Anthropic block index for the current reasoning block
 		toolIndexMap        map[int]int    // OpenAI tool index → Anthropic block index
-		codexItemToBlockIdx map[string]int // Codex item_id → Anthropic block index (parallel tool calls)
-		lastCodexBlockIdx   int            // most recently opened Codex tool block (fallback routing)
-		stoppedBlocks       map[int]bool   // blocks already stopped (avoid double-stop)
+		codexItemToBlockIdx  map[string]int // Codex item_id → Anthropic block index (parallel tool calls)
+		lastCodexBlockIdx    int            // most recently opened Codex tool block (fallback routing)
+		codexWebSearchBlocks     map[string]int  // Codex web_search_call item_id → Anthropic block index
+		codexWebSearchResultDone map[string]bool // tracks whether web_search_tool_result was emitted for item_id
+		stoppedBlocks            = map[int]bool{} // blocks already stopped (avoid double-stop)
 	)
 
 	scanner := bufio.NewScanner(body)
@@ -147,7 +149,9 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 				if !ok {
 					continue
 				}
-				if item["type"] == "function_call" {
+				itemType, _ := item["type"].(string)
+				switch itemType {
+				case "function_call":
 					if !textBlockClosed {
 						textBlockClosed = true
 						writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
@@ -156,9 +160,6 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 					}
 					callId, _ := item["call_id"].(string)
 					name, _ := item["name"].(string)
-					// The Responses API puts the per-item identifier on
-					// `id`; `call_id` is the separate tool-use id Anthropic
-					// clients echo back on tool_result.
 					itemID, _ := item["id"].(string)
 					lastAnthropicIdx++
 					toolBlockCount++
@@ -177,6 +178,38 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 							"id":    callId,
 							"name":  name,
 							"input": map[string]interface{}{},
+						},
+					})
+				case "web_search_call":
+					if !textBlockClosed {
+						textBlockClosed = true
+						writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
+							"type": "content_block_stop", "index": 0,
+						})
+					}
+					itemID, _ := item["id"].(string)
+					query := ""
+					if action, ok := item["action"].(map[string]interface{}); ok {
+						query, _ = action["query"].(string)
+					}
+					lastAnthropicIdx++
+					// Do NOT increment toolBlockCount — web_search is
+					// server-side; stop_reason must stay "end_turn" so
+					// Claude Code doesn't send a follow-up tool_result.
+					if codexWebSearchBlocks == nil {
+						codexWebSearchBlocks = map[string]int{}
+					}
+					if itemID != "" {
+						codexWebSearchBlocks[itemID] = lastAnthropicIdx
+					}
+					writeSSE(w, flusher, "content_block_start", map[string]interface{}{
+						"type":  "content_block_start",
+						"index": lastAnthropicIdx,
+						"content_block": map[string]interface{}{
+							"type":  "server_tool_use",
+							"id":    itemID,
+							"name":  "web_search",
+							"input": map[string]interface{}{"query": query},
 						},
 					})
 				}
@@ -238,6 +271,84 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 					fmt.Println("CODEX STRM: function_call_arguments.done (complete)")
 				}
 
+			case "response.web_search_call.completed", "response.web_search_call.searching":
+				// On completed: close the server_tool_use block only.
+				// The web_search_tool_result is deferred to output_item.done
+				// where action.sources are available.
+				if cType == "response.web_search_call.completed" {
+					itemID, _ := cChunk["item_id"].(string)
+					if blockIdx, ok := codexWebSearchBlocks[itemID]; ok {
+						stoppedBlocks[blockIdx] = true
+						writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
+							"type": "content_block_stop", "index": blockIdx,
+						})
+					}
+				}
+
+			case "response.web_search_call.in_progress":
+				// no-op
+
+			case "response.output_item.done":
+				// For web_search_call items: close any still-open
+				// server_tool_use block and emit web_search_tool_result
+				// with sources extracted from action.sources[].
+				if item, ok := cChunk["item"].(map[string]interface{}); ok {
+					if item["type"] == "web_search_call" {
+						itemID, _ := item["id"].(string)
+						if blockIdx, ok := codexWebSearchBlocks[itemID]; ok {
+							// Close server_tool_use block if not already done
+							if !stoppedBlocks[blockIdx] {
+								stoppedBlocks[blockIdx] = true
+								writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
+									"type": "content_block_stop", "index": blockIdx,
+								})
+							}
+
+							// Extract sources from action.sources
+							var searchResults []interface{}
+							if action, ok := item["action"].(map[string]interface{}); ok {
+								if rawSources, ok := action["sources"].([]interface{}); ok {
+									for _, rs := range rawSources {
+										if src, ok := rs.(map[string]interface{}); ok {
+											url, _ := src["url"].(string)
+											title, _ := src["title"].(string)
+											searchResults = append(searchResults, map[string]interface{}{
+												"type":              "web_search_result",
+												"url":               url,
+												"title":             title,
+												"encrypted_content": "",
+											})
+										}
+									}
+								}
+							}
+							if searchResults == nil {
+								searchResults = []interface{}{}
+							}
+
+							// Emit web_search_tool_result block
+							lastAnthropicIdx++
+							writeSSE(w, flusher, "content_block_start", map[string]interface{}{
+								"type":  "content_block_start",
+								"index": lastAnthropicIdx,
+								"content_block": map[string]interface{}{
+									"type":        "web_search_tool_result",
+									"tool_use_id": itemID,
+									"content":     searchResults,
+								},
+							})
+							stoppedBlocks[lastAnthropicIdx] = true
+							writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
+								"type": "content_block_stop", "index": lastAnthropicIdx,
+							})
+							if codexWebSearchResultDone == nil {
+								codexWebSearchResultDone = map[string]bool{}
+							}
+							codexWebSearchResultDone[itemID] = true
+						}
+					}
+				}
+
 			case "response.reasoning_summary_text.delta":
 				deltaStr, _ := cChunk["delta"].(string)
 				if deltaStr != "" {
@@ -268,9 +379,6 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 			case "response.reasoning_summary_text.done":
 				if reasoningBlockOpen {
 					reasoningBlockOpen = false
-					if stoppedBlocks == nil {
-						stoppedBlocks = map[int]bool{}
-					}
 					stoppedBlocks[reasoningBlockIdx] = true
 					writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
 						"type": "content_block_stop", "index": reasoningBlockIdx,
@@ -316,6 +424,34 @@ func HandleStream(w http.ResponseWriter, body io.ReadCloser, originalModel strin
 						}
 					} else if toolBlockCount > 0 {
 						reason = "tool_use"
+					}
+
+					// Safety net: emit web_search_tool_result for any
+					// web_search_call that never got an output_item.done.
+					for wsID, blockIdx := range codexWebSearchBlocks {
+						if codexWebSearchResultDone[wsID] {
+							continue
+						}
+						if !stoppedBlocks[blockIdx] {
+							stoppedBlocks[blockIdx] = true
+							writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
+								"type": "content_block_stop", "index": blockIdx,
+							})
+						}
+						lastAnthropicIdx++
+						writeSSE(w, flusher, "content_block_start", map[string]interface{}{
+							"type":  "content_block_start",
+							"index": lastAnthropicIdx,
+							"content_block": map[string]interface{}{
+								"type":        "web_search_tool_result",
+								"tool_use_id": wsID,
+								"content":     []interface{}{},
+							},
+						})
+						stoppedBlocks[lastAnthropicIdx] = true
+						writeSSE(w, flusher, "content_block_stop", map[string]interface{}{
+							"type": "content_block_stop", "index": lastAnthropicIdx,
+						})
 					}
 
 					finalizeStream(w, flusher, textBlockClosed, lastAnthropicIdx, reason, inputTokens, outputTokens, cachedTokens, stoppedBlocks)

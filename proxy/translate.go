@@ -30,9 +30,11 @@ type AnthropicMessage struct {
 }
 
 type AnthropicTool struct {
+	Type        string                 `json:"type,omitempty"`
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
-	InputSchema map[string]interface{} `json:"input_schema"`
+	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
+	MaxUses     *int                   `json:"max_uses,omitempty"`
 }
 
 type ContentBlock struct {
@@ -44,6 +46,29 @@ type ContentBlock struct {
 	ToolUseID string                 `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage        `json:"content,omitempty"`
 	Source    map[string]interface{} `json:"source,omitempty"`
+}
+
+// isAnthropicWebSearchTool reports whether an Anthropic tool definition
+// refers to Anthropic's built-in server-side web_search tool (any
+// "web_search_*" type variant) rather than a client-defined function.
+func isAnthropicWebSearchTool(t AnthropicTool) bool {
+	return strings.HasPrefix(t.Type, "web_search_") ||
+		(t.Type == "" && t.Name == "web_search" && len(t.InputSchema) == 0)
+}
+
+// isWebSearchToolChoice reports whether a tool_choice object forces
+// the web_search tool. Such choices must be dropped because web_search
+// is a native tool, not a function — forcing it as {"type":"function",
+// "name":"web_search"} would error on OpenAI's side.
+func isWebSearchToolChoice(tc map[string]interface{}) bool {
+	if tc == nil {
+		return false
+	}
+	if t, _ := tc["type"].(string); t == "tool" {
+		name, _ := tc["name"].(string)
+		return name == "web_search"
+	}
+	return false
 }
 
 // ── OpenAI Chat Completions request types ────────────────────────────
@@ -100,6 +125,7 @@ type CodexRequest struct {
 	Reasoning        *CodexReasoning `json:"reasoning,omitempty"`
 	ParallelToolCall *bool           `json:"parallel_tool_calls,omitempty"`
 	ServiceTier      string          `json:"service_tier,omitempty"`
+	Include          []string        `json:"include,omitempty"`
 }
 
 type CodexReasoning struct {
@@ -161,6 +187,8 @@ type CodexOutputItem struct {
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+	// web_search_call
+	Action map[string]interface{} `json:"action,omitempty"`
 	// reasoning
 	Summary          []CodexReasoningSummary `json:"summary,omitempty"`
 	EncryptedContent string                  `json:"encrypted_content,omitempty"`
@@ -520,8 +548,21 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 			codexReq.ParallelToolCall = &t
 		}
 
-		// Tool choice
-		if choice := translateToolChoice(req.ToolChoice, true); choice != nil {
+		// When web_search is present, ask OpenAI to include source URLs
+		// in the web_search_call action so we can surface them to clients.
+		for _, tool := range req.Tools {
+			if isAnthropicWebSearchTool(tool) {
+				codexReq.Include = []string{"web_search_call.action.sources"}
+				break
+			}
+		}
+
+		// Tool choice — web_search is a native tool, not a function,
+		// so translate it to {"type":"web_search"} instead of the
+		// function wrapper that translateToolChoice would produce.
+		if isWebSearchToolChoice(req.ToolChoice) {
+			codexReq.ToolChoice = map[string]interface{}{"type": "web_search"}
+		} else if choice := translateToolChoice(req.ToolChoice, true); choice != nil {
 			codexReq.ToolChoice = choice
 		}
 
@@ -662,8 +703,10 @@ func TranslateRequest(req *AnthropicRequest, cfg *config.Config) (interface{}, s
 
 	oaiReq.Tools = translateOpenAITools(req.Tools)
 
-	if choice := translateToolChoice(req.ToolChoice, false); choice != nil {
-		oaiReq.ToolChoice = choice
+	if !isWebSearchToolChoice(req.ToolChoice) {
+		if choice := translateToolChoice(req.ToolChoice, false); choice != nil {
+			oaiReq.ToolChoice = choice
+		}
 	}
 
 	return oaiReq, originalModel, mappedModel
@@ -764,6 +807,47 @@ func TranslateCodexResponse(resp *CodexResponse, originalModel string) *Anthropi
 				"name":  item.Name,
 				"input": args,
 			})
+		case "web_search_call":
+			// Do NOT set hasFunctionCall — web_search is server-side;
+			// stop_reason must stay "end_turn" so clients don't send a
+			// follow-up tool_result.
+			query := ""
+			if item.Action != nil {
+				query, _ = item.Action["query"].(string)
+			}
+			content = append(content, map[string]interface{}{
+				"type":  "server_tool_use",
+				"id":    item.ID,
+				"name":  "web_search",
+				"input": map[string]interface{}{"query": query},
+			})
+			// Extract sources from action.sources (populated when the
+			// request included "web_search_call.action.sources").
+			var searchResults []interface{}
+			if item.Action != nil {
+				if rawSources, ok := item.Action["sources"].([]interface{}); ok {
+					for _, rs := range rawSources {
+						if src, ok := rs.(map[string]interface{}); ok {
+							url, _ := src["url"].(string)
+							title, _ := src["title"].(string)
+							searchResults = append(searchResults, map[string]interface{}{
+								"type":              "web_search_result",
+								"url":               url,
+								"title":             title,
+								"encrypted_content": "",
+							})
+						}
+					}
+				}
+			}
+			if searchResults == nil {
+				searchResults = []interface{}{}
+			}
+			content = append(content, map[string]interface{}{
+				"type":        "web_search_tool_result",
+				"tool_use_id": item.ID,
+				"content":     searchResults,
+			})
 		case "reasoning":
 			// Optional: surface reasoning summary as a thinking block.
 			// Anthropic clients ignore unknown types so this is safe.
@@ -830,6 +914,10 @@ func translateCodexTools(tools []AnthropicTool) []CodexTool {
 	}
 	out := make([]CodexTool, 0, len(tools))
 	for i, t := range tools {
+		if isAnthropicWebSearchTool(t) {
+			out = append(out, CodexTool{Type: "web_search"})
+			continue
+		}
 		name := t.Name
 		if name == "" {
 			name = fmt.Sprintf("unnamed_tool_%d", i)
@@ -852,6 +940,12 @@ func translateOpenAITools(tools []AnthropicTool) []OpenAITool {
 	}
 	out := make([]OpenAITool, 0, len(tools))
 	for i, t := range tools {
+		if isAnthropicWebSearchTool(t) {
+			// Chat Completions has no equivalent server-side search.
+			// Drop silently; users who need web search should use
+			// AUTH_MODE=chatgpt.
+			continue
+		}
 		name := t.Name
 		if name == "" {
 			name = fmt.Sprintf("unnamed_tool_%d", i)

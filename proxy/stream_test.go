@@ -194,6 +194,117 @@ func TestHandleStreamCodexIncompleteReasonMapping(t *testing.T) {
 	}
 }
 
+// TestHandleStreamCodexWebSearchCall verifies that a web_search_call
+// output item is translated into Anthropic server_tool_use +
+// web_search_tool_result content blocks in the SSE stream.
+func TestHandleStreamCodexWebSearchCall(t *testing.T) {
+	sse := strings.Join([]string{
+		// Text before web search
+		`data: {"type":"response.output_text.delta","delta":"Searching..."}`,
+		`data: {"type":"response.output_item.added","item":{"type":"web_search_call","id":"ws_1","action":{"type":"web_search","query":"latest Go release"}}}`,
+		`data: {"type":"response.web_search_call.searching","item_id":"ws_1"}`,
+		`data: {"type":"response.web_search_call.completed","item_id":"ws_1"}`,
+		// output_item.done carries action.sources when include was set
+		`data: {"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","action":{"type":"web_search","query":"latest Go release","sources":[{"url":"https://go.dev/blog/go1.24","title":"Go 1.24 Release Notes"},{"url":"https://example.com","title":"Example"}]}}}`,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":50,"output_tokens":20}}}`,
+		``,
+	}, "\n\n")
+
+	w := httptest.NewRecorder()
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
+	out := w.Body.String()
+
+	// Must have server_tool_use block_start
+	if !strings.Contains(out, `"type":"server_tool_use"`) {
+		t.Errorf("expected server_tool_use block in stream:\n%s", out)
+	}
+	if !strings.Contains(out, `"name":"web_search"`) {
+		t.Errorf("expected web_search name in stream:\n%s", out)
+	}
+	if !strings.Contains(out, `"query":"latest Go release"`) {
+		t.Errorf("expected query in server_tool_use input:\n%s", out)
+	}
+	// Must have web_search_tool_result block with sources
+	if !strings.Contains(out, `"type":"web_search_tool_result"`) {
+		t.Errorf("expected web_search_tool_result block in stream:\n%s", out)
+	}
+	if !strings.Contains(out, `"type":"web_search_result"`) {
+		t.Errorf("expected web_search_result entries in stream:\n%s", out)
+	}
+	if !strings.Contains(out, `https://go.dev/blog/go1.24`) {
+		t.Errorf("expected source URL in stream:\n%s", out)
+	}
+	if !strings.Contains(out, `Go 1.24 Release Notes`) {
+		t.Errorf("expected source title in stream:\n%s", out)
+	}
+	// web_search is server-side — stop_reason must be end_turn, not tool_use
+	if !strings.Contains(out, `"stop_reason":"end_turn"`) {
+		t.Errorf("expected stop_reason=end_turn:\n%s", out)
+	}
+	if strings.Contains(out, `"stop_reason":"tool_use"`) {
+		t.Errorf("web_search must not produce stop_reason=tool_use:\n%s", out)
+	}
+	// Text before web search should appear
+	if !strings.Contains(out, `Searching...`) {
+		t.Errorf("expected text output in stream:\n%s", out)
+	}
+}
+
+// TestHandleStreamCodexWebSearchCallDoneOnly verifies the safety path
+// where response.output_item.done closes a web_search_call block that
+// was not closed by web_search_call.completed.
+func TestHandleStreamCodexWebSearchCallDoneOnly(t *testing.T) {
+	// When web_search_call.completed is never sent, output_item.done
+	// should still close the block and emit web_search_tool_result.
+	sse := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"type":"web_search_call","id":"ws_2","action":{"type":"web_search","query":"Go 1.24"}}}`,
+		`data: {"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_2","action":{"type":"web_search","query":"Go 1.24","sources":[{"url":"https://go.dev","title":"Go"}]}}}`,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		``,
+	}, "\n\n")
+
+	w := httptest.NewRecorder()
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
+	out := w.Body.String()
+
+	if !strings.Contains(out, `"type":"server_tool_use"`) {
+		t.Errorf("expected server_tool_use block:\n%s", out)
+	}
+	if !strings.Contains(out, `"type":"web_search_tool_result"`) {
+		t.Errorf("expected web_search_tool_result block:\n%s", out)
+	}
+	if !strings.Contains(out, `https://go.dev`) {
+		t.Errorf("expected source URL in web_search_tool_result:\n%s", out)
+	}
+	if !strings.Contains(out, `"stop_reason":"end_turn"`) {
+		t.Errorf("expected stop_reason=end_turn:\n%s", out)
+	}
+}
+
+// TestHandleStreamCodexWebSearchNoSources verifies that when
+// output_item.done has no sources, an empty content array is emitted.
+func TestHandleStreamCodexWebSearchNoSources(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"type":"web_search_call","id":"ws_3","action":{"type":"web_search","query":"test"}}}`,
+		`data: {"type":"response.web_search_call.completed","item_id":"ws_3"}`,
+		`data: {"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_3","action":{"type":"web_search","query":"test"}}}`,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		``,
+	}, "\n\n")
+
+	w := httptest.NewRecorder()
+	HandleStream(w, newFakeBody(sse), "claude-3-5-sonnet", true, 100)
+	out := w.Body.String()
+
+	if !strings.Contains(out, `"type":"web_search_tool_result"`) {
+		t.Errorf("expected web_search_tool_result block:\n%s", out)
+	}
+	// Should have empty content array (no web_search_result entries)
+	if strings.Contains(out, `"type":"web_search_result"`) {
+		t.Errorf("should not have web_search_result when no sources:\n%s", out)
+	}
+}
+
 // TestHandleStreamCodexSingleToolCall is a sanity check that the
 // item_id routing still works for the common single-tool case.
 func TestHandleStreamCodexSingleToolCall(t *testing.T) {

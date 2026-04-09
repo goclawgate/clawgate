@@ -15,6 +15,7 @@ Claude Code speaks the Anthropic API. clawgate sits in the middle, translates ev
 | **Streaming** | Full SSE support with error handling and auto-retry on 429s |
 | **Tool calls** | Complete `tool_use` round-trip translation |
 | **Reasoning** | Maps Anthropic `thinking` to OpenAI `reasoning_effort` automatically |
+| **Web search** | Translates Anthropic `web_search` to native OpenAI web search (ChatGPT mode) |
 | **Cross-platform** | Linux, macOS, Windows — amd64 and arm64 |
 
 ---
