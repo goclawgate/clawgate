@@ -16,7 +16,7 @@ const (
 	ClientID      = "app_EMoamEEZ73f0CkXaXp7hrann"
 	CodexEndpoint = "https://chatgpt.com/backend-api/codex/responses"
 	PollMarginMs  = 3000
-	Version       = "1.3.0"
+	Version       = "1.3.1"
 
 	// tokenExpiryBuffer is the window (in seconds) before the true
 	// token expiry where we proactively refresh. Five minutes gives
