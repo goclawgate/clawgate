@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -52,13 +53,25 @@ func randomSessionID() string {
 
 // NewHandler creates a handler with a configured HTTP client.
 func NewHandler(cfg *config.Config) *Handler {
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 15 * time.Second, // aggressive keep-alive for long streams
+		}).DialContext,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       0, // never kill idle connections (streams can pause)
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 0, // no timeout waiting for response headers (reasoning can be slow)
+	}
+
 	return &Handler{
 		Cfg: cfg,
 		Client: &http.Client{
 			// Reasoning models can think for many minutes; rely on the
 			// per-request context (cancelled when the client disconnects)
 			// rather than a hard timeout.
-			Timeout: 0,
+			Timeout:   0,
+			Transport: transport,
 		},
 	}
 }
